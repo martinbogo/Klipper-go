@@ -1,0 +1,19 @@
+{
+  "go.toolsEnvVars": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "CGO_ENABLED": "1"
+  },
+  "go.testEnvVars": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "CGO_ENABLED": "1"
+  },
+  "gopls": {
+    "env": {
+      "GOOS": "linux",
+      "GOARCH": "arm64",
+      "CGO_ENABLED": "0"
+    }
+  }
+}

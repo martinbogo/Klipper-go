@@ -1,0 +1,10 @@
+artifacts/
+.DS_Store
+*.bak*
+vendor/
+gklib_new
+gklib_static
+libc_helper_anycubic.so
+printer.generated.cfg
+internal/pkg/chelper/libc_helper.a
+internal/pkg/chelper/libc_helper.so

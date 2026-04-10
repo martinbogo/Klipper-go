@@ -1,0 +1,15 @@
+{
+  "name": "Klipper-go Linux development",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ]
+    }
+  },
+  "postCreateCommand": "go version && /usr/bin/arm-linux-gnueabihf-gcc --version"
+}

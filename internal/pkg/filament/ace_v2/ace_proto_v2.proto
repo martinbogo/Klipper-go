@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package ace_v2;
+option go_package = "goklipper/internal/pkg/filament/ace_v2";
+
+message SetFanRequest {
+    uint32 speed = 1;
+}
+
+message SetRfidEnableRequest {
+    bool enable = 1;
+}
+
+message DryingRequest {
+    uint32 temperature = 1;
+    uint32 duration_hours = 2;
+}
+
+message FeedOrRollbackRequest {
+    int32 length = 1;
+    uint32 speed = 2;
+}
+
+message FilamentInfoResponse {
+    uint32 slot_index = 1;
+    string color_hex = 2;
+    uint32 current_temp = 3;
+    bool is_drying = 4;
+}
+
+message StatusResponse {
+    uint32 state = 1;
+    uint32 current_temp = 2;
+    uint32 target_temp = 3;
+    bool error_flag = 4;
+}
