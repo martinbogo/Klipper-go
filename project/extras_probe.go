@@ -12,10 +12,9 @@ import (
 	"goklipper/common/utils/object"
 	"goklipper/common/value"
 	gcodepkg "goklipper/internal/pkg/gcode"
-	probepkg "goklipper/internal/pkg/motion/probe"
 	printerpkg "goklipper/internal/pkg/printer"
+	probepkg "goklipper/internal/pkg/motion/probe"
 	"reflect"
-	"strings"
 )
 
 const HINT_TIMEOUT = "If the probe did not move far enough to trigger, then consider reducing the Z axis minimum position so the probecan travel further (the Z minimum position can be negative)."
@@ -43,306 +42,6 @@ type PrinterProbe struct {
 	Gcode               *GCodeDispatch
 	final_speed         float64
 	core                *probepkg.PrinterProbe
-}
-
-type probeCommandContext struct {
-	probe *PrinterProbe
-}
-
-func unwrapProbeCommand(command probepkg.ProbeCommand) *GCodeCommand {
-	if typed, ok := command.(*GCodeCommand); ok {
-		return typed
-	}
-	panic("unsupported probe command adapter")
-}
-
-func (self *probeCommandContext) Name() string {
-	return self.probe.Name
-}
-
-func (self *probeCommandContext) Core() *probepkg.PrinterProbe {
-	return self.probe.core
-}
-
-func (self *probeCommandContext) ToolheadPosition() []float64 {
-	return MustLookupToolhead(self.probe.Printer).Get_position()
-}
-
-func (self *probeCommandContext) LastMoveTime() float64 {
-	return MustLookupToolhead(self.probe.Printer).Get_last_move_time()
-}
-
-func (self *probeCommandContext) QueryEndstop(printTime float64) int {
-	switch typed := self.probe.Mcu_probe.(type) {
-	case *ProbeEndstopWrapper:
-		return typed.Query_endstop(printTime)
-	case *MCU_endstop:
-		return typed.Query_endstop(printTime)
-	case interface{ Query_endstop(float64) int }:
-		return typed.Query_endstop(printTime)
-	default:
-		panic("unsupported probe endstop runtime")
-	}
-}
-
-func (self *probeCommandContext) Probe(speed float64) []float64 {
-	return self.probe.Probe(speed)
-}
-
-func (self *probeCommandContext) RunProbeCommand(command probepkg.ProbeCommand) []float64 {
-	return self.probe.Run_probe(unwrapProbeCommand(command))
-}
-
-func (self *probeCommandContext) Move(coord []interface{}, speed float64) {
-	self.probe.Move(coord, speed)
-}
-
-func (self *probeCommandContext) BeginMultiProbe() {
-	self.probe.Multi_probe_begin()
-}
-
-func (self *probeCommandContext) EndMultiProbe() {
-	self.probe.Multi_probe_end()
-}
-
-func (self *probeCommandContext) EnsureNoManualProbe() {
-	Verify_no_manual_probe(self.probe.Printer)
-}
-
-func (self *probeCommandContext) StartManualProbe(command probepkg.ProbeCommand, finalize func([]float64)) {
-	NewManualProbeHelper(self.probe.Printer, unwrapProbeCommand(command), finalize)
-}
-
-func (self *probeCommandContext) SetConfig(section string, option string, value string) {
-	configfile := self.probe.Printer.Lookup_object("configfile", object.Sentinel{}).(*PrinterConfig)
-	configfile.Set(section, option, value)
-}
-
-func (self *probeCommandContext) HomingOriginZ() float64 {
-	return self.probe.Gcode_move.Get_status(0)["homing_origin"].([]float64)[2]
-}
-
-func (self *probeCommandContext) RespondInfo(msg string, log bool) {
-	self.probe.Gcode.Respond_info(msg, log)
-}
-
-type probeEndstopRuntime struct {
-	endstop *ProbeEndstopWrapper
-}
-
-type probeEndstopIdentifyRuntime struct {
-	endstop *ProbeEndstopWrapper
-}
-
-func (self *probeEndstopRuntime) ToolheadPosition() []float64 {
-	return MustLookupToolhead(self.endstop.Printer).Get_position()
-}
-
-func (self *probeEndstopRuntime) RunActivateGCode() {
-	self.endstop.Activate_gcode.(*TemplateWrapper).Run_gcode_from_command(nil)
-}
-
-func (self *probeEndstopRuntime) RunDeactivateGCode() {
-	self.endstop.Deactivate_gcode.(*TemplateWrapper).Run_gcode_from_command(nil)
-}
-
-func (self *probeEndstopIdentifyRuntime) KinematicsSteppers() []interface{} {
-	kinematics := MustLookupToolhead(self.endstop.Printer).Get_kinematics()
-	return kinematics.(interface{ Get_steppers() []interface{} }).Get_steppers()
-}
-
-func (self *probeEndstopIdentifyRuntime) StepperIsActiveAxis(stepper interface{}, axis rune) bool {
-	return stepper.(interface{ Is_active_axis(rune) int }).Is_active_axis(axis) != 0
-}
-
-func (self *probeEndstopIdentifyRuntime) AddStepper(stepper interface{}) {
-	self.endstop.Add_stepper(stepper)
-}
-
-type probeEventContext struct {
-	probe *PrinterProbe
-}
-
-func (self *probeEventContext) Core() *probepkg.PrinterProbe {
-	return self.probe.core
-}
-
-func (self *probeEventContext) MatchesHomingMoveEndstop(endstop interface{}) bool {
-	wrapped, ok := endstop.(*ProbeEndstopWrapper)
-	return ok && self.probe.Mcu_probe == wrapped
-}
-
-func (self *probeEventContext) MatchesHomeRailEndstop(endstop interface{}) bool {
-	return self.probe.Mcu_probe == endstop
-}
-
-func (self *probeEventContext) PrepareProbe(move interface{}) {
-	self.probe.Mcu_probe.(*ProbeEndstopWrapper).Probe_prepare(move)
-}
-
-func (self *probeEventContext) FinishProbe(move interface{}) {
-	self.probe.Mcu_probe.(*ProbeEndstopWrapper).Probe_finish(move)
-}
-
-func (self *probeEventContext) BeginMCUMultiProbe() {
-	self.probe.Mcu_probe.(*ProbeEndstopWrapper).Multi_probe_begin()
-}
-
-func (self *probeEventContext) EndMCUMultiProbe() {
-	switch typed := self.probe.Mcu_probe.(type) {
-	case *PrinterProbe:
-		typed.Multi_probe_end()
-	case *ProbeEndstopWrapper:
-		typed.Multi_probe_end()
-	}
-}
-
-func (self *probeEventContext) SendEvent(event string) {
-	self.probe.Printer.Send_event(event, nil)
-}
-
-func (self *probeEventContext) SyncCoreState() {
-	self.probe.syncCoreState()
-}
-
-func probeHomingMoveEndstops(move *HomingMove) []interface{} {
-	return flattenProbeEndstops(move.Endstops)
-}
-
-func probeRailEndstops(rails []*PrinterRail) []interface{} {
-	return flattenProbeEndstops(collectRailEndstops(rails))
-}
-
-func flattenProbeEndstops(namedEndstops []list.List) []interface{} {
-	endstops := make([]interface{}, 0, len(namedEndstops))
-	for _, namedEndstop := range namedEndstops {
-		if namedEndstop.Front() == nil {
-			continue
-		}
-		endstops = append(endstops, namedEndstop.Front().Value)
-	}
-	return endstops
-}
-
-type probeMotionContext struct {
-	probe *PrinterProbe
-}
-
-func (self *probeMotionContext) Core() *probepkg.PrinterProbe {
-	return self.probe.core
-}
-
-func (self *probeMotionContext) HomedAxes() string {
-	toolhead := MustLookupToolhead(self.probe.Printer)
-	curtime := self.probe.Printer.Get_reactor().Monotonic()
-	status := toolhead.Get_status(curtime)
-	return status["homed_axes"].(string)
-}
-
-func (self *probeMotionContext) ToolheadPosition() []float64 {
-	return MustLookupToolhead(self.probe.Printer).Get_position()
-}
-
-func (self *probeMotionContext) ProbingMove(target []float64, speed float64) []float64 {
-	phoming := self.probe.Printer.Lookup_object("homing", object.Sentinel{}).(*PrinterHoming)
-	switch typed := self.probe.Mcu_probe.(type) {
-	case *MCU_endstop:
-		return phoming.Probing_move(typed, target, speed)
-	case *ProbeEndstopWrapper:
-		return phoming.Probing_move(typed, target, speed)
-	default:
-		panic("unsupported probe endstop runtime")
-	}
-}
-
-func (self *probeMotionContext) RespondInfo(msg string, log bool) {
-	self.probe.Gcode.Respond_info(msg, log)
-}
-
-type probePointsAutomaticProbe struct {
-	probe *PrinterProbe
-}
-
-func (self *probePointsAutomaticProbe) GetLiftSpeed(command probepkg.ProbeCommand) float64 {
-	return self.probe.Get_lift_speed(unwrapProbeCommand(command))
-}
-
-func (self *probePointsAutomaticProbe) GetOffsets() []float64 {
-	x, y, z := self.probe.Get_offsets()
-	return []float64{x, y, z}
-}
-
-func (self *probePointsAutomaticProbe) BeginMultiProbe() {
-	self.probe.Multi_probe_begin()
-}
-
-func (self *probePointsAutomaticProbe) EndMultiProbe() {
-	self.probe.Multi_probe_end()
-}
-
-func (self *probePointsAutomaticProbe) RunProbe(command probepkg.ProbeCommand) []float64 {
-	return self.probe.Run_probe(unwrapProbeCommand(command))
-}
-
-type probePointsContext struct {
-	helper *ProbePointsHelper
-}
-
-func (self *probePointsContext) EnsureNoManualProbe() {
-	Verify_no_manual_probe(self.helper.printer)
-}
-
-func (self *probePointsContext) LookupAutomaticProbe() probepkg.ProbePointsAutomaticProbe {
-	probeObj := self.helper.printer.Lookup_object("probe", object.Sentinel{})
-	probe := probeObj.(*PrinterProbe)
-	if probe == nil {
-		return nil
-	}
-	return &probePointsAutomaticProbe{probe: probe}
-}
-
-func (self *probePointsContext) Move(coord []interface{}, speed float64) {
-	MustLookupToolhead(self.helper.printer).Manual_move(coord, speed)
-}
-
-func (self *probePointsContext) TouchLastMoveTime() {
-	MustLookupToolhead(self.helper.printer).Get_last_move_time()
-}
-
-func (self *probePointsContext) StartManualProbe(finalize func([]float64)) {
-	gcmd := self.helper.gcode.Create_gcode_command("", "", nil)
-	NewManualProbeHelper(self.helper.printer, gcmd, func(kinPos []float64) {
-		finalize(kinPos)
-		self.helper.syncCoreState()
-	})
-}
-
-type probeRunContext struct {
-	probe *PrinterProbe
-}
-
-func (self *probeRunContext) Core() *probepkg.PrinterProbe {
-	return self.probe.core
-}
-
-func (self *probeRunContext) ToolheadPosition() []float64 {
-	return MustLookupToolhead(self.probe.Printer).Get_position()
-}
-
-func (self *probeRunContext) Probe(speed float64) []float64 {
-	return self.probe.Probe(speed)
-}
-
-func (self *probeRunContext) Move(coord []interface{}, speed float64) {
-	self.probe.Move(coord, speed)
-}
-
-func (self *probeRunContext) BeginMultiProbe() {
-	self.probe.Multi_probe_begin()
-}
-
-func (self *probeRunContext) EndMultiProbe() {
-	self.probe.Multi_probe_end()
 }
 
 func NewPrinterProbe(config *ConfigWrapper, mcu_probe interface{}) *PrinterProbe {
@@ -456,98 +155,198 @@ func (self *PrinterProbe) syncCoreState() {
 	self.Z_position = self.core.ZPosition
 }
 
-func (self *PrinterProbe) Handle_homing_move_begin(args []interface{}) error {
-	hmove := args[0].(*HomingMove)
+type printerProbeAdapter struct {
+	probe *PrinterProbe
+}
+
+func (self *printerProbeAdapter) Core() *probepkg.PrinterProbe {
+	return self.probe.core
+}
+
+func (self *printerProbeAdapter) Name() string {
+	return self.probe.Name
+}
+
+func (self *printerProbeAdapter) SyncCoreState() {
+	self.probe.syncCoreState()
+}
+
+func (self *printerProbeAdapter) SendEvent(event string) {
+	self.probe.Printer.Send_event(event, nil)
+}
+
+func (self *printerProbeAdapter) MatchesHomingMoveEndstop(endstop interface{}) bool {
+	probeEndstop, ok := endstop.(*ProbeEndstopWrapper)
+	return ok && self.probe.Mcu_probe == probeEndstop
+}
+
+func (self *printerProbeAdapter) MatchesHomeRailEndstop(endstop interface{}) bool {
+	return self.probe.Mcu_probe == endstop
+}
+
+func (self *printerProbeAdapter) PrepareProbe(move interface{}) {
+	if probeEndstop, ok := self.probe.Mcu_probe.(*ProbeEndstopWrapper); ok {
+		probeEndstop.Probe_prepare(move)
+	}
+}
+
+func (self *printerProbeAdapter) FinishProbe(move interface{}) {
+	if probeEndstop, ok := self.probe.Mcu_probe.(*ProbeEndstopWrapper); ok {
+		probeEndstop.Probe_finish(move)
+	}
+}
+
+func (self *printerProbeAdapter) BeginMCUMultiProbe() {
+	switch typed := self.probe.Mcu_probe.(type) {
+	case *PrinterProbe:
+		typed.Multi_probe_begin()
+	case *ProbeEndstopWrapper:
+		typed.Multi_probe_begin()
+	}
+}
+
+func (self *printerProbeAdapter) EndMCUMultiProbe() {
+	switch typed := self.probe.Mcu_probe.(type) {
+	case *PrinterProbe:
+		typed.Multi_probe_end()
+	case *ProbeEndstopWrapper:
+		typed.Multi_probe_end()
+	}
+}
+
+func (self *printerProbeAdapter) HomedAxes() string {
+	toolhead := MustLookupToolhead(self.probe.Printer)
+	homedAxes, _ := toolhead.Get_status(self.probe.Printer.Get_reactor().Monotonic())["homed_axes"].(string)
+	return homedAxes
+}
+
+func (self *printerProbeAdapter) ToolheadPosition() []float64 {
+	return MustLookupToolhead(self.probe.Printer).Get_position()
+}
+
+func (self *printerProbeAdapter) ProbingMove(target []float64, speed float64) []float64 {
+	phoming := self.probe.Printer.Lookup_object("homing", object.Sentinel{}).(*PrinterHoming)
+	switch typed := self.probe.Mcu_probe.(type) {
+	case *MCU_endstop:
+		return phoming.Probing_move(typed, target, speed)
+	case *ProbeEndstopWrapper:
+		return phoming.Probing_move(typed, target, speed)
+	default:
+		panic(fmt.Sprintf("probe endstop has unexpected type %T", self.probe.Mcu_probe))
+	}
+}
+
+func (self *printerProbeAdapter) RespondInfo(msg string, log bool) {
+	self.probe.Gcode.Respond_info(msg, log)
+}
+
+func (self *printerProbeAdapter) LastMoveTime() float64 {
+	return MustLookupToolhead(self.probe.Printer).Get_last_move_time()
+}
+
+func (self *printerProbeAdapter) QueryEndstop(printTime float64) int {
+	return self.probe.Mcu_probe.(*ProbeEndstopWrapper).Query_endstop(printTime)
+}
+
+func (self *printerProbeAdapter) Probe(speed float64) []float64 {
+	return probepkg.RunProbeMove(self, speed)
+}
+
+func (self *printerProbeAdapter) RunProbeCommand(command probepkg.ProbeCommand) []float64 {
+	return probepkg.RunProbeSequence(self, command)
+}
+
+func (self *printerProbeAdapter) Move(coord []interface{}, speed float64) {
+	self.probe.Move(coord, speed)
+}
+
+func (self *printerProbeAdapter) BeginMultiProbe() {
+	probepkg.BeginMultiProbe(self)
+}
+
+func (self *printerProbeAdapter) EndMultiProbe() {
+	probepkg.EndMultiProbe(self)
+}
+
+func (self *printerProbeAdapter) EnsureNoManualProbe() {
+	Verify_no_manual_probe(self.probe.Printer)
+}
+
+func (self *printerProbeAdapter) StartManualProbe(command probepkg.ProbeCommand, finalize func([]float64)) {
+	gcmd, ok := command.(*GCodeCommand)
+	if !ok {
+		panic(fmt.Sprintf("probe command has unexpected type %T", command))
+	}
+	NewManualProbeHelper(self.probe.Printer, gcmd, finalize)
+}
+
+func (self *printerProbeAdapter) SetConfig(section string, option string, value string) {
+	configfile := self.probe.Printer.Lookup_object("configfile", object.Sentinel{}).(*PrinterConfig)
+	configfile.Set(section, option, value)
+}
+
+func (self *printerProbeAdapter) HomingOriginZ() float64 {
+	return self.probe.Gcode_move.Get_status(0)["homing_origin"].([]float64)[2]
+}
+
+func flattenHomingMoveProbeEndstops(hmove *HomingMove) []interface{} {
+	endstops := make([]interface{}, 0)
 	for _, e := range hmove.Get_mcu_endstops() {
 		es := e.(list.List)
-		if _, ok := es.Front().Value.(*ProbeEndstopWrapper); ok {
-			if self.Mcu_probe == es.Front().Value.(*ProbeEndstopWrapper) {
-				self.Mcu_probe.(*ProbeEndstopWrapper).Probe_prepare(hmove)
-				break
+		if es.Front() != nil {
+			endstops = append(endstops, es.Front().Value)
+		}
+	}
+	return endstops
+}
+
+func flattenHomeRailProbeEndstops(rails []*PrinterRail) []interface{} {
+	endstops := make([]interface{}, 0)
+	for _, rail := range rails {
+		for _, val := range rail.Get_endstops() {
+			if val.Front() != nil {
+				endstops = append(endstops, val.Front().Value)
 			}
 		}
 	}
+	return endstops
+}
 
+func (self *PrinterProbe) Handle_homing_move_begin(args []interface{}) error {
+	hmove := args[0].(*HomingMove)
+	probepkg.HandleHomingMoveBegin(&printerProbeAdapter{probe: self}, hmove, flattenHomingMoveProbeEndstops(hmove))
 	return nil
 }
 
 func (self *PrinterProbe) Handle_homing_move_end(args []interface{}) error {
 	hmove := args[0].(*HomingMove)
-	for _, e := range hmove.Get_mcu_endstops() {
-		es := e.(list.List)
-		if _, ok := es.Front().Value.(*ProbeEndstopWrapper); ok {
-			if self.Mcu_probe == es.Front().Value.(*ProbeEndstopWrapper) {
-				self.Mcu_probe.(*ProbeEndstopWrapper).Probe_finish(hmove)
-				break
-			}
-		}
-	}
+	probepkg.HandleHomingMoveEnd(&printerProbeAdapter{probe: self}, hmove, flattenHomingMoveProbeEndstops(hmove))
 	return nil
 }
 
 func (self *PrinterProbe) Handle_home_rails_begin(args []interface{}) error {
 	rails := args[1].([]*PrinterRail)
-	var endstops []interface{}
-	for _, rail := range rails {
-		for _, val := range rail.Get_endstops() {
-			es := val.Front().Value
-			endstops = append(endstops, es)
-		}
-	}
-	for _, val := range endstops {
-		if self.Mcu_probe == val {
-			self.Multi_probe_begin()
-			break
-		}
-	}
+	probepkg.HandleHomeRailsBegin(&printerProbeAdapter{probe: self}, flattenHomeRailProbeEndstops(rails))
 	return nil
 }
 
 func (self *PrinterProbe) Handle_home_rails_end(args []interface{}) error {
 	rails := args[1].([]*PrinterRail)
-	var endstops []interface{}
-	for _, rail := range rails {
-		for _, val := range rail.Get_endstops() {
-			es := val.Front().Value
-			endstops = append(endstops, es)
-		}
-	}
-	for _, val := range endstops {
-		if self.Mcu_probe == val {
-			self.Multi_probe_end()
-			break
-		}
-	}
-
+	probepkg.HandleHomeRailsEnd(&printerProbeAdapter{probe: self}, flattenHomeRailProbeEndstops(rails))
 	return nil
 }
 
 func (self *PrinterProbe) Handle_command_error(args []interface{}) error {
-	self.Multi_probe_end()
-
+	probepkg.HandleCommandError(&printerProbeAdapter{probe: self})
 	return nil
 }
 
 func (self *PrinterProbe) Multi_probe_begin() {
-	self.Printer.Send_event("homing:multi_probe_begin", nil)
-	self.Mcu_probe.(*ProbeEndstopWrapper).Multi_probe_begin()
-	self.core.BeginMultiProbe()
-	self.syncCoreState()
+	probepkg.BeginMultiProbe(&printerProbeAdapter{probe: self})
 }
 
 func (self *PrinterProbe) Multi_probe_end() {
-	if self.core.EndMultiProbe() {
-		self.syncCoreState()
-		pp, ppOk := self.Mcu_probe.(*PrinterProbe)
-		if ppOk {
-			pp.Multi_probe_end()
-		}
-		pepw, pepwOk := self.Mcu_probe.(*ProbeEndstopWrapper)
-		if pepwOk {
-			pepw.Multi_probe_end()
-		}
-	}
-	self.Printer.Send_event("homing:multi_probe_end", nil)
+	probepkg.EndMultiProbe(&printerProbeAdapter{probe: self})
 }
 
 func (self *PrinterProbe) Setup_pin(pin_type string, pin_params map[string]interface{}) interface{} {
@@ -573,26 +372,7 @@ func (self *PrinterProbe) Get_offsets() (float64, float64, float64) {
 	return self.core.GetOffsets()
 }
 func (self *PrinterProbe) Probe(speed float64) []float64 {
-	toolhead := MustLookupToolhead(self.Printer)
-	var curtime = self.Printer.Get_reactor().Monotonic()
-	str, _ := toolhead.Get_status(curtime)["homed_axes"]
-	if !strings.Contains(str.(string), "z") {
-		panic(("Must home before probe"))
-	}
-	phoming_obj := self.Printer.Lookup_object("homing", object.Sentinel{})
-	phoming := phoming_obj.(*PrinterHoming)
-	var pos = toolhead.Get_position()
-	pos[2] = self.Z_position
-	// try:
-	var epos []float64
-	if _, ok := self.Mcu_probe.(*MCU_endstop); ok {
-		epos = phoming.Probing_move(self.Mcu_probe.(*MCU_endstop), pos, speed)
-	} else {
-		epos = phoming.Probing_move(self.Mcu_probe.(*ProbeEndstopWrapper), pos, speed)
-	}
-	self.Gcode.Respond_info(fmt.Sprintf("probe at %.3f,%.3f is z=%.6f", epos[0], epos[1], epos[2]), true)
-
-	return epos[:3]
+	return probepkg.RunProbeMove(&printerProbeAdapter{probe: self}, speed)
 }
 
 func (self *PrinterProbe) Move(coord interface{}, speed float64) {
@@ -622,92 +402,23 @@ func (self *PrinterProbe) Calc_median(positions [][]float64) []float64 {
 }
 
 func (self *PrinterProbe) Run_probe(gcmd *GCodeCommand) []float64 {
-	zero := 0.
-	var speed = gcmd.Get_float("PROBE_SPEED", self.Speed, nil, nil, &zero, nil)
-	var lift_speed = self.Get_lift_speed(gcmd)
-	one := 1
-	var sample_count = gcmd.Get_int("SAMPLES", self.Sample_count, &one, nil)
-	var sample_retract_dist = gcmd.Get_float("SAMPLE_RETRACT_DIST",
-		self.Sample_retract_dist, nil, nil, &zero, nil)
-	var samples_tolerance = gcmd.Get_float("SAMPLES_TOLERANCE",
-		self.Samples_tolerance, &zero, nil, &zero, nil)
-	zero_int := 0
-	var samples_retries = gcmd.Get_int("SAMPLES_TOLERANCE_RETRIES",
-		self.Samples_retries, &zero_int, nil)
-	var samples_result = gcmd.Get("SAMPLES_RESULT", self.Samples_result,
-		"", &zero, &zero, &zero, &zero)
-	var must_notify_multi_probe = !self.Multi_probe_pending
-	if must_notify_multi_probe {
-		self.Multi_probe_begin()
-	}
-	probexy := MustLookupToolhead(self.Printer).Get_position()[:2]
-	var retries = 0
-	var positions = [][]float64{}
-	for len(positions) < sample_count {
-		// Probe position
-		pos := self.Probe(speed)
-		positions = append(positions, pos)
-		// Check samples tolerance
-		if probepkg.ExceedsTolerance(positions, samples_tolerance) {
-			if retries >= samples_retries {
-				panic("Probe samples exceed samples_tolerance")
-			}
-			gcmd.Respond_info("Probe samples exceed tolerance. Retrying...", true)
-			retries += 1
-			positions = [][]float64{}
-		}
-		// Retract
-		if len(positions) < sample_count {
-			arr := make([]interface{}, 0)
-			for _, item := range probexy {
-				arr = append(arr, item)
-			}
-			arr = append(arr, pos[2]+sample_retract_dist)
-			self.Move(arr, lift_speed)
-		}
-	}
-
-	if must_notify_multi_probe {
-		self.Multi_probe_end()
-	}
-	// Calculate and return result
-	if samples_result == "median" {
-		return self.Calc_median(positions)
-	}
-	return self.Calc_mean(positions)
+	return probepkg.RunProbeSequence(&printerProbeAdapter{probe: self}, gcmd)
 }
 
 const cmd_PROBE_help = "Probe Z-height at current XY position"
 
 func (self *PrinterProbe) Cmd_PROBE(arg interface{}) error {
-	gcmd := arg.(*GCodeCommand)
-	var pos = self.Run_probe(gcmd)
-	gcmd.Respond_info(fmt.Sprintf("Result is z=%.6f", pos[2]), true)
-	self.core.RecordLastZResult(pos[2])
+	err := probepkg.HandleProbeCommand(&printerProbeAdapter{probe: self}, arg.(*GCodeCommand))
 	self.syncCoreState()
-	return nil
+	return err
 }
 
 const cmd_QUERY_PROBE_help = "Return the status of the z-probe"
 
 func (self *PrinterProbe) Cmd_QUERY_PROBE(arg interface{}) error {
-	gcmd := arg.(*GCodeCommand)
-	count := gcmd.Get_int("COUNT", 5, nil, nil)
-	var toolhead = self.Printer.Lookup_object("toolhead", object.Sentinel{})
-	for i := 0; i < count; i++ {
-		var print_time = toolhead.(*Toolhead).Get_last_move_time()
-		var res = self.Mcu_probe.(*ProbeEndstopWrapper).Query_endstop(print_time)
-		self.core.RecordLastState(res == 1)
-		self.syncCoreState()
-		if res == 1 {
-			gcmd.Respond_info(fmt.Sprintf("probe: %s", "TRIGGERED"), true)
-			break
-		} else {
-			gcmd.Respond_info(fmt.Sprintf("probe: %s", "open"), true)
-		}
-	}
-
-	return nil
+	err := probepkg.HandleQueryProbeCommand(&printerProbeAdapter{probe: self}, arg.(*GCodeCommand))
+	self.syncCoreState()
+	return err
 }
 
 func (self *PrinterProbe) get_status(eventtime float64) map[string]interface{} {
@@ -717,107 +428,19 @@ func (self *PrinterProbe) get_status(eventtime float64) map[string]interface{} {
 const cmd_PROBE_ACCURACY_help = "Probe Z-height accuracy at current XY position"
 
 func (self *PrinterProbe) Cmd_PROBE_ACCURACY(arg interface{}) error {
-	gcmd := arg.(*GCodeCommand)
-	zero := 0.
-	var speed = gcmd.Get_float("PROBE_SPEED", self.Speed, nil, nil, &zero, nil)
-	var lift_speed = self.Get_lift_speed(gcmd)
-	one_int := 1
-	var sample_count = gcmd.Get_int("SAMPLES", 10, &one_int, nil)
-	var sample_retract_dist = gcmd.Get_float("SAMPLE_RETRACT_DIST",
-		self.Sample_retract_dist, nil, nil, &zero, nil)
-	var toolhead = self.Printer.Lookup_object("toolhead", object.Sentinel{})
-	//if err != nil {
-	//	logger.Error(err)
-	//}
-	var pos = toolhead.(*Toolhead).Get_position()
-	gcmd.Respond_info(fmt.Sprintf("PROBE_ACCURACY at X:%.3f Y:%.3f Z:%.3f"+
-		" (samples=%d retract=%.3f"+
-		" speed=%.1f lift_speed=%.1f)\n", pos[0], pos[1], pos[2],
-		sample_count, sample_retract_dist,
-		speed, lift_speed), true)
-	// Probe bed sample_count times
-	self.Multi_probe_begin()
-	var positions = [][]float64{}
-	for {
-		var pos = self.Probe(speed)
-		positions = append(positions, pos)
-		// Retract
-		val := pos[2] + sample_retract_dist
-		var liftpos = []*float64{nil, nil, &val}
-		self.Move(liftpos, lift_speed)
-		if len(positions) >= sample_count {
-			break
-		}
-	}
-
-	self.Multi_probe_end()
-	// Calculate maximum, minimum and average values
-	stats := probepkg.Accuracy(positions)
-	// Show information
-	gcmd.Respond_info(
-		fmt.Sprintf("probe accuracy results: maximum %.6f, minimum %.6f, range %.6f,"+
-			"average %.6f, median %.6f, standard deviation %.6f",
-			stats.Maximum, stats.Minimum, stats.Range, stats.Average, stats.Median, stats.Sigma), true)
-	return nil
-}
-func (self *PrinterProbe) Probe_calibrate_finalize(kin_pos []float64) {
-	if len(kin_pos) == 0 {
-		return
-	}
-	var z_offset = self.core.CalibratedOffset(kin_pos)
-	self.Gcode.Respond_info(fmt.Sprintf(
-		"%s: z_offset: %.3f\n"+
-			"The SAVE_CONFIG command will update the printer config file\n"+
-			"with the above and restart the printer.", self.Name, z_offset), true)
-	configfile := self.Printer.Lookup_object("configfile", object.Sentinel{})
-	configfile.(*PrinterConfig).Set(self.Name, "z_offset", fmt.Sprintf("%.3f", z_offset))
+	return probepkg.HandleProbeAccuracyCommand(&printerProbeAdapter{probe: self}, arg.(*GCodeCommand))
 }
 
 const cmd_PROBE_CALIBRATE_help = "Calibrate the probe's z_offset"
 
 func (self *PrinterProbe) Cmd_PROBE_CALIBRATE(gcmd interface{}) error {
-	Verify_no_manual_probe(self.Printer)
-	// Perform initial probe
-	var lift_speed = self.Get_lift_speed(gcmd.(*GCodeCommand))
-	var curpos = self.Run_probe(gcmd.(*GCodeCommand))
-	// Move away from the bed
-	self.core.SetProbeCalibrateZ(curpos[2])
+	err := probepkg.HandleProbeCalibrateCommand(&printerProbeAdapter{probe: self}, gcmd.(*GCodeCommand))
 	self.syncCoreState()
-	curpos[2] += 5.
-	curpos_interface := []interface{}{}
-	for _, c := range curpos {
-		curpos_interface = append(curpos_interface, c)
-	}
-	self.Move(curpos_interface, lift_speed)
-	// Move the nozzle over the probe point
-	curpos[0] += self.X_offset
-	curpos[1] += self.Y_offset
-	curpos_interface = []interface{}{}
-	for _, c := range curpos {
-		curpos_interface = append(curpos_interface, c)
-	}
-	self.Move(curpos_interface, self.Speed)
-	// Start manual probe
-	NewManualProbeHelper(self.Printer, gcmd.(*GCodeCommand),
-		self.Probe_calibrate_finalize)
-	return nil
+	return err
 }
 
 func (self *PrinterProbe) Cmd_Z_OFFSET_APPLY_PROBE(argv interface{}) error {
-	var offset = self.Gcode_move.Get_status(0)["homing_origin"].([]float64)[2]
-	var configfile = self.Printer.Lookup_object("configfile", object.Sentinel{})
-	if offset == 0 {
-		self.Gcode.Respond_info("Nothing to do: Z Offset is 0", true)
-	} else {
-		var new_calibrate = self.Z_offset - offset
-		self.Gcode.Respond_info(fmt.Sprintf(
-			"%s: z_offset: %.3f\n"+
-				"The SAVE_CONFIG command will update the printer config file\n"+
-				"with the above and restart the printer.",
-			self.Name, new_calibrate), true)
-		configfile.(*PrinterConfig).Set(self.Name, "z_offset", fmt.Sprintf("%.4f", new_calibrate))
-	}
-	return nil
+	return probepkg.HandleZOffsetApplyProbeCommand(&printerProbeAdapter{probe: self})
 }
 
 const cmd_Z_OFFSET_APPLY_PROBE_help = "Adjust the probe's z_offset"
@@ -961,6 +584,69 @@ type ProbePointsHelper struct {
 	core                 *probepkg.ProbePointsHelper
 }
 
+type probePointsAutomaticProbeAdapter struct {
+	probe *PrinterProbe
+}
+
+func (self *probePointsAutomaticProbeAdapter) GetLiftSpeed(command probepkg.ProbeCommand) float64 {
+	gcmd, ok := command.(*GCodeCommand)
+	if !ok {
+		panic(fmt.Sprintf("probe command has unexpected type %T", command))
+	}
+	return self.probe.Get_lift_speed(gcmd)
+}
+
+func (self *probePointsAutomaticProbeAdapter) GetOffsets() []float64 {
+	x, y, z := self.probe.Get_offsets()
+	return []float64{x, y, z}
+}
+
+func (self *probePointsAutomaticProbeAdapter) BeginMultiProbe() {
+	self.probe.Multi_probe_begin()
+}
+
+func (self *probePointsAutomaticProbeAdapter) EndMultiProbe() {
+	self.probe.Multi_probe_end()
+}
+
+func (self *probePointsAutomaticProbeAdapter) RunProbe(command probepkg.ProbeCommand) []float64 {
+	gcmd, ok := command.(*GCodeCommand)
+	if !ok {
+		panic(fmt.Sprintf("probe command has unexpected type %T", command))
+	}
+	return self.probe.Run_probe(gcmd)
+}
+
+type probePointsRuntimeAdapter struct {
+	helper *ProbePointsHelper
+}
+
+func (self *probePointsRuntimeAdapter) EnsureNoManualProbe() {
+	Verify_no_manual_probe(self.helper.printer)
+}
+
+func (self *probePointsRuntimeAdapter) LookupAutomaticProbe() probepkg.ProbePointsAutomaticProbe {
+	probeObj := self.helper.printer.Lookup_object("probe", object.Sentinel{})
+	probe, ok := probeObj.(*PrinterProbe)
+	if !ok {
+		return nil
+	}
+	return &probePointsAutomaticProbeAdapter{probe: probe}
+}
+
+func (self *probePointsRuntimeAdapter) Move(coord []interface{}, speed float64) {
+	MustLookupToolhead(self.helper.printer).Manual_move(coord, speed)
+}
+
+func (self *probePointsRuntimeAdapter) TouchLastMoveTime() {
+	MustLookupToolhead(self.helper.printer).Get_last_move_time()
+}
+
+func (self *probePointsRuntimeAdapter) StartManualProbe(finalize func([]float64)) {
+	gcmd := self.helper.gcode.Create_gcode_command("", "", nil)
+	NewManualProbeHelper(self.helper.printer, gcmd, finalize)
+}
+
 func NewProbePointsHelper(config *ConfigWrapper, finalize_callback interface{}, default_points [][]float64) *ProbePointsHelper {
 	self := &ProbePointsHelper{}
 	self.printer = config.Get_printer()
@@ -1018,82 +704,14 @@ func (self *ProbePointsHelper) Get_lift_speed() float64 {
 }
 
 func (self *ProbePointsHelper) Move_next() bool {
-	toolhead := MustLookupToolhead(self.printer)
-	// Lift toolhead
-	var speed = self.core.LiftSpeed()
-	if len(self.results) != 0 {
-		// Use full speed to first probe position
-		speed = self.speed
-	}
-	toolhead.Manual_move([]interface{}{nil, nil, self.core.HorizontalMoveZ()}, speed)
-	if self.core.ResultCount() >= len(self.probe_points) {
-		toolhead.Get_last_move_time()
-	}
-	done, _, target := self.core.NextProbePoint()
+	done := self.core.MoveNext(&probePointsRuntimeAdapter{helper: self})
 	self.syncCoreState()
-	if done {
-		return true
-	}
-	// Move to next XY probe point
-	nextpos := make([]interface{}, len(target))
-	for i, item := range target {
-		nextpos[i] = item
-	}
-	toolhead.Manual_move(nextpos, self.speed)
-	return false
+	return done
 }
 
 func (self *ProbePointsHelper) Start_probe(gcmd *GCodeCommand) {
-	Verify_no_manual_probe(self.printer)
-	// Lookup objects
-	var probe_obj = self.printer.Lookup_object("probe", object.Sentinel{})
-	probe := probe_obj.(*PrinterProbe)
-	zero := 0.
-	var method = strings.ToLower(gcmd.Get("METHOD", "automatic", 0,
-		&zero, &zero, &zero, &zero))
-	if probe == nil || method != "automatic" {
-		// Manual probe
-		self.core.BeginManualSession()
-		self.syncCoreState()
-		self.Manual_probe_start()
-		return
-	}
-	// Perform automatic probing
-	liftSpeed := probe.Get_lift_speed(gcmd)
-	val1, val2, val3 := probe.Get_offsets()
-	self.core.BeginAutomaticSession(liftSpeed, []float64{val1, val2, val3})
+	self.core.StartProbe(&probePointsRuntimeAdapter{helper: self}, gcmd)
 	self.syncCoreState()
-	if self.horizontal_move_z < self.probe_offsets[2] {
-		panic("horizontal_move_z can t be less than probe's z_offset")
-	}
-	probe.Multi_probe_begin()
-	for {
-		var done = self.Move_next()
-		if done {
-			break
-		}
-		var pos = probe.Run_probe(gcmd)
-		self.core.AppendResult(pos)
-		self.syncCoreState()
-	}
-	probe.Multi_probe_end()
-}
-
-func (self *ProbePointsHelper) Manual_probe_start() {
-	var done = self.Move_next()
-	if !done {
-		var gcmd = self.gcode.Create_gcode_command("", "", nil)
-		NewManualProbeHelper(self.printer, gcmd, self.Manual_probe_finalize)
-	}
-}
-
-func (self *ProbePointsHelper) Manual_probe_finalize(kin_pos []float64) {
-	if kin_pos == nil {
-		return
-	}
-	self.core.AppendResult(kin_pos)
-	self.syncCoreState()
-	self.Manual_probe_start()
 }
 
 func Load_config_probe(config *ConfigWrapper) interface{} {

@@ -14,13 +14,48 @@ import (
 	probepkg "goklipper/internal/pkg/motion/probe"
 	printerpkg "goklipper/internal/pkg/printer"
 	printpkg "goklipper/internal/print"
+	"math"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 const (
 	RECONNECT_COUNT = 10
 )
+
+func parseRGB(s string) []interface{} {
+	var r, g, self float64
+	fmt.Sscanf(s, "%f,%f,%f", &r, &g, &self)
+	return []interface{}{r, g, self}
+}
+
+func normalizeACEFilamentType(requestedType string, fallbackType string) string {
+	trimmedType := strings.TrimSpace(requestedType)
+	if trimmedType == "" || trimmedType == "?" {
+		fallbackType = strings.TrimSpace(fallbackType)
+		if fallbackType != "" {
+			return fallbackType
+		}
+	}
+	return trimmedType
+}
+
+func hasValidACESlotRFID(slot map[string]interface{}) bool {
+	sku, _ := slot["sku"].(string)
+	sku = strings.TrimSpace(sku)
+	return sku != "" && sku != "custom"
+}
+
+func buildACEColorList(color []interface{}) []interface{} {
+	if len(color) != 3 {
+		return nil
+	}
+	return []interface{}{
+		[]interface{}{color[0], color[1], color[2], 255},
+	}
+}
 
 type aceFilamentSensor interface {
 	FilamentPresent() bool
@@ -70,7 +105,74 @@ type ACE struct {
 }
 
 func (self *ACE) persistFilamentSlotConfig(index int, slotData map[string]interface{}) {
-	filamentpkg.PersistFilamentSlotConfig(index, slotData, filamentpkg.AmsConfigPath)
+	cfgPath := "/userdata/app/gk/config/ams_config.cfg"
+	configData := map[string]interface{}{}
+
+	if amsBytes, err := os.ReadFile(cfgPath); err == nil {
+		if len(amsBytes) > 0 {
+			if err := json.Unmarshal(amsBytes, &configData); err != nil {
+				logger.Errorf("Failed to unmarshal ams config: %v", err)
+				return
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		logger.Errorf("Failed to read ams config: %v", err)
+		return
+	}
+
+	filaments, ok := configData["filaments"].(map[string]interface{})
+	if !ok || filaments == nil {
+		filaments = make(map[string]interface{})
+		configData["filaments"] = filaments
+	}
+
+	iStr := strconv.Itoa(index)
+	existingSlot, existingExists := filaments[iStr].(map[string]interface{})
+	persistedSlot := make(map[string]interface{})
+	if existingExists {
+		for k, v := range existingSlot {
+			persistedSlot[k] = v
+		}
+	}
+	for k, v := range slotData {
+		if v != nil {
+			persistedSlot[k] = v
+		} else {
+			delete(persistedSlot, k)
+		}
+	}
+
+	if _, ok := persistedSlot["icon_type"]; !ok {
+		persistedSlot["icon_type"] = 0
+	}
+	if color, ok := persistedSlot["color"].([]interface{}); ok {
+		if colors, ok := persistedSlot["colors"].([]interface{}); !ok || len(colors) == 0 {
+			if generatedColors := buildACEColorList(color); generatedColors != nil {
+				persistedSlot["colors"] = generatedColors
+			}
+		}
+	}
+
+	newSlotJSON, err := json.Marshal(persistedSlot)
+	if err != nil {
+		logger.Errorf("Failed to marshal slot config: %v", err)
+		return
+	}
+	if existingExists {
+		existingSlotJSON, err := json.Marshal(existingSlot)
+		if err == nil && string(existingSlotJSON) == string(newSlotJSON) {
+			return
+		}
+	}
+
+	filaments[iStr] = persistedSlot
+	outBytes, err := json.Marshal(configData)
+	if err != nil {
+		logger.Errorf("Failed to marshal config: %v", err)
+		return
+	}
+	err = os.WriteFile(cfgPath, outBytes, 0644)
+	logger.Infof("Persisted ACE slot %d to ams_config.cfg. err=%v", index, err)
 }
 
 // TODO: Ensure the logic in this file (and all ACE/filament routing modules) is 100%
@@ -134,20 +236,183 @@ func NewAce(config *ConfigWrapper) *ACE {
 	self.change_tool_in_progress = false
 	self.endstops = map[string]interface{}{}
 
-	self.custom_slots = filamentpkg.DefaultCustomSlots()
+	self.custom_slots = []map[string]interface{}{
+		{"type": "", "color": []interface{}{0.0, 0.0, 0.0}, "colors": []interface{}{[]interface{}{0, 0, 0, 0}}, "sku": "", "rfid": 1, "source": 2, "icon_type": 0},
+		{"type": "", "color": []interface{}{0.0, 0.0, 0.0}, "colors": []interface{}{[]interface{}{0, 0, 0, 0}}, "sku": "", "rfid": 1, "source": 2, "icon_type": 0},
+		{"type": "", "color": []interface{}{0.0, 0.0, 0.0}, "colors": []interface{}{[]interface{}{0, 0, 0, 0}}, "sku": "", "rfid": 1, "source": 2, "icon_type": 0},
+		{"type": "", "color": []interface{}{0.0, 0.0, 0.0}, "colors": []interface{}{[]interface{}{0, 0, 0, 0}}, "sku": "", "rfid": 1, "source": 2, "icon_type": 0},
+	}
 
-	filamentpkg.LoadCustomSlotsFromConfig(self.custom_slots, filamentpkg.AmsConfigPath)
+	if amsBytes, err := os.ReadFile("/userdata/app/gk/config/ams_config.cfg"); err == nil {
+		var configData map[string]interface{}
+		if err := json.Unmarshal(amsBytes, &configData); err == nil {
+			if filaments, ok := configData["filaments"].(map[string]interface{}); ok {
+				for iStr, fData := range filaments {
+					i, err := strconv.Atoi(iStr)
+					if err == nil && i >= 0 && i < len(self.custom_slots) {
+						if fMap, ok := fData.(map[string]interface{}); ok {
+							if typ, ok := fMap["type"].(string); ok {
+								self.custom_slots[i]["type"] = typ
+							}
+							if color, ok := fMap["color"].([]interface{}); ok {
+								self.custom_slots[i]["color"] = color
+							}
+							if colors, ok := fMap["colors"].([]interface{}); ok {
+								self.custom_slots[i]["colors"] = colors
+							}
+							if sku, ok := fMap["sku"].(string); ok {
+								self.custom_slots[i]["sku"] = sku
+							}
+							if rfid, ok := fMap["rfid"]; ok {
+								self.custom_slots[i]["rfid"] = rfid
+							}
+							if source, ok := fMap["source"]; ok {
+								self.custom_slots[i]["source"] = source
+							}
+							if iconType, ok := fMap["icon_type"]; ok {
+								self.custom_slots[i]["icon_type"] = iconType
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	//# Default data to prevent exceptions
-	self.info = filamentpkg.BuildDefaultACEInfo(self.custom_slots)
+	self.info = map[string]interface{}{
+		"status": "ready",
+		"dryer": map[string]interface{}{
+			"status":      "stop",
+			"target_temp": 0,
+			"duration":    0,
+			"remain_time": 0,
+		},
+		"temp":              0,
+		"enable_rfid":       1,
+		"fan_speed":         7000,
+		"feed_assist_count": 0,
+		"cont_assist_time":  0.0,
+		"slots": []interface{}{
+			map[string]interface{}{
+				"index":     0,
+				"status":    "ready",
+				"sku":       "",
+				"type":      self.custom_slots[0]["type"],
+				"color":     self.custom_slots[0]["color"],
+				"colors":    self.custom_slots[0]["colors"],
+				"icon_type": 0,
+				"remain":    0,
+				"decorder":  0,
+				"rfid":      1,
+				"source":    2,
+			},
+			map[string]interface{}{
+				"index":     1,
+				"status":    "ready",
+				"sku":       "",
+				"type":      self.custom_slots[1]["type"],
+				"color":     self.custom_slots[1]["color"],
+				"colors":    self.custom_slots[1]["colors"],
+				"icon_type": 0,
+				"remain":    0,
+				"decorder":  0,
+				"rfid":      1,
+				"source":    2,
+			},
+			map[string]interface{}{
+				"index":     2,
+				"status":    "ready",
+				"sku":       "",
+				"type":      self.custom_slots[2]["type"],
+				"color":     self.custom_slots[2]["color"],
+				"colors":    self.custom_slots[2]["colors"],
+				"icon_type": 0,
+				"remain":    0,
+				"decorder":  0,
+				"rfid":      1,
+				"source":    2,
+			},
+			map[string]interface{}{
+				"index":     3,
+				"status":    "ready",
+				"sku":       "",
+				"type":      self.custom_slots[3]["type"],
+				"color":     self.custom_slots[3]["color"],
+				"colors":    self.custom_slots[3]["colors"],
+				"icon_type": 0,
+				"remain":    0,
+				"decorder":  0,
+				"rfid":      1,
+				"source":    2,
+			},
+		},
+	}
+
+	// If a slot has an empty type, revert its status to "empty" to match physical state if unknown
+	for i, s := range self.info["slots"].([]interface{}) {
+		sm := s.(map[string]interface{})
+		if i < len(self.custom_slots) {
+			cust := self.custom_slots[i]
+			if sku, ok := cust["sku"].(string); ok && strings.TrimSpace(sku) != "" {
+				sm["sku"] = sku
+			}
+			if rfid, ok := cust["rfid"]; ok {
+				sm["rfid"] = rfid
+			}
+			if source, ok := cust["source"]; ok {
+				sm["source"] = source
+			}
+			if iconType, ok := cust["icon_type"]; ok {
+				sm["icon_type"] = iconType
+			}
+		}
+		if t, ok := sm["type"].(string); ok && t == "" {
+			sm["status"] = "empty"
+		}
+	}
 
 	if self.variables == nil {
 		self.variables = map[string]interface{}{}
 	}
-	filamentpkg.EnsureDefaultVariables(self.variables)
+	if _, ok := self.variables["ace_current_index"]; !ok {
+		self.variables["ace_current_index"] = int64(0)
+	}
+	if _, ok := self.variables["ace_filament_pos"]; !ok {
+		self.variables["ace_filament_pos"] = "bowden"
+	}
+	if _, ok := self.variables["ace_endless_spool_enabled"]; !ok {
+		self.variables["ace_endless_spool_enabled"] = false
+	}
+	if _, ok := self.variables["ace_inventory"]; !ok {
+		self.variables["ace_inventory"] = []interface{}{
+			map[string]interface{}{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+			map[string]interface{}{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+			map[string]interface{}{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+			map[string]interface{}{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+		}
+	}
 
 	//# Add inventory for 4 slots - load from persistent variables if available
-	self.inventory = filamentpkg.InitializeInventory(self.variables)
+	var saved_inventory []interface{}
+	if val, ok := self.variables["ace_inventory"]; ok && val != nil {
+		if inv_slice, ok := val.([]interface{}); ok {
+			saved_inventory = inv_slice
+		}
+	}
+
+	if saved_inventory != nil {
+		for _, inv := range saved_inventory {
+			self.inventory = append(self.inventory, inv.(map[string]interface{}))
+		}
+	} else {
+		self.inventory = []map[string]interface{}{
+			{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+			{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+			{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+			{"status": "empty", "color": []interface{}{0, 0, 0}, "material": "", "temp": 0},
+		}
+	}
 
 	//self._create_mmu_sensor(config, extruder_sensor_pin, "extruder_sensor")
 	//self._create_mmu_sensor(config, toolhead_sensor_pin, "toolhead_sensor")
@@ -342,7 +607,7 @@ func (self *ACE) _disconnect() {
 }
 
 func (self *ACE) calc_reconnect_timeout(attempt int) float64 {
-	return filamentpkg.CalcReconnectTimeout(attempt)
+	return 0.8*float64(attempt) + math.Cos(float64(attempt))*0.5
 }
 
 func (self *ACE) write_handle(eventtime float64) interface{} {
@@ -399,7 +664,7 @@ func (self *ACE) _periodic_heartbeat_event(eventtime float64) float64 {
 						custColor, _ := cust["color"].([]interface{})
 						custColors, hasCustColors := cust["colors"].([]interface{})
 
-						if filamentpkg.HasValidACESlotRFID(slot) {
+						if hasValidACESlotRFID(slot) {
 							if typ, ok := slot["type"].(string); ok {
 								self.custom_slots[i]["type"] = strings.TrimSpace(typ)
 							}
@@ -407,7 +672,7 @@ func (self *ACE) _periodic_heartbeat_event(eventtime float64) float64 {
 								self.custom_slots[i]["color"] = color
 								if colors, ok := slot["colors"].([]interface{}); ok && len(colors) > 0 {
 									self.custom_slots[i]["colors"] = colors
-								} else if generatedColors := filamentpkg.BuildACEColorList(color); generatedColors != nil {
+								} else if generatedColors := buildACEColorList(color); generatedColors != nil {
 									self.custom_slots[i]["colors"] = generatedColors
 									slot["colors"] = generatedColors
 								}
@@ -965,6 +1230,20 @@ func (self *ACE) cmd_ACE_CHANGE_TOOL(argv interface{}) error {
 	return nil
 }
 
+func (self *ACE) _find_next_available_slot(current_slot int) int {
+	//"""Find the next available slot with filament for endless spool"""
+	for i := 0; i < 4; i++ {
+		next_slot := (current_slot + 1 + i) % 4
+		if next_slot != current_slot {
+			if self.inventory[next_slot]["status"] == "ready" &&
+				self.info["slots"].([]interface{})[next_slot].(map[string]interface{})["status"] == "ready" {
+				return next_slot
+			}
+		}
+	}
+	return -1
+}
+
 func (self *ACE) _endless_spool_runout_handler() {
 	defer func() {
 		if err := recover(); err != nil {
@@ -1017,7 +1296,7 @@ func (self *ACE) _execute_endless_spool_change() {
 	}
 
 	current_tool := int(self.variables["ace_current_index"].(int64))
-	next_tool := filamentpkg.FindNextAvailableSlot(current_tool, self.inventory, self.info)
+	next_tool := self._find_next_available_slot(current_tool)
 
 	if next_tool == -1 {
 		self.gcode.Respond_info("ACE: No available slots for endless spool, pausing print", true)
@@ -1211,7 +1490,7 @@ func (self *ACE) cmd_ACE_SET_SLOT(argv interface{}) error {
 		return errors.New("COLOR, MATERIAL, TEMP must be set unless EMPTY=1")
 	}
 
-	color := filamentpkg.ParseRGB(color_str)
+	color := parseRGB(color_str)
 	if len(color) != 3 {
 		return errors.New("COLOR must be R,G,B")
 	}
@@ -1282,7 +1561,7 @@ func (self *ACE) Set_filament_info(index int, typ string, sku string, color []in
 	if index >= 0 && index < len(self.custom_slots) {
 		if self.info != nil {
 			if slots, ok := self.info["slots"].([]interface{}); ok && index < len(slots) {
-				if slotMap, ok := slots[index].(map[string]interface{}); ok && filamentpkg.HasValidACESlotRFID(slotMap) {
+				if slotMap, ok := slots[index].(map[string]interface{}); ok && hasValidACESlotRFID(slotMap) {
 					logger.Infof("Ignoring panel filament info for RFID-backed slot %d with sku=%v", index, slotMap["sku"])
 					persistedSlot := map[string]interface{}{
 						"type":      slotMap["type"],
@@ -1299,8 +1578,61 @@ func (self *ACE) Set_filament_info(index int, typ string, sku string, color []in
 			}
 		}
 
-		updatedInfo, persistedSlot := filamentpkg.UpdateACESlotInfo(self.custom_slots[index], self.info, index, typ, color)
-		self.info = updatedInfo
+		existingType, _ := self.custom_slots[index]["type"].(string)
+		typ = normalizeACEFilamentType(typ, existingType)
+		self.custom_slots[index]["type"] = typ
+		self.custom_slots[index]["color"] = color
+		self.custom_slots[index]["sku"] = ""
+		self.custom_slots[index]["rfid"] = 1
+		self.custom_slots[index]["source"] = 2
+		self.custom_slots[index]["icon_type"] = 0
+
+		var colorsList []interface{}
+		if len(color) == 3 {
+			colorsList = buildACEColorList(color)
+			self.custom_slots[index]["colors"] = colorsList
+		}
+
+		// Instant update to self.info if available
+		if self.info != nil {
+			import_json := true
+			_ = import_json
+			encoded, _ := json.Marshal(self.info)
+			var newInfo map[string]interface{}
+			json.Unmarshal(encoded, &newInfo)
+
+			if slots, ok := newInfo["slots"].([]interface{}); ok {
+				if index < len(slots) {
+					if slotMap, ok2 := slots[index].(map[string]interface{}); ok2 {
+						slotMap["type"] = typ
+						slotMap["status"] = "ready"
+						slotMap["sku"] = ""
+						slotMap["rfid"] = 1
+						slotMap["source"] = 2
+						slotMap["icon_type"] = 0
+						slotMap["remain"] = 0
+						slotMap["decorder"] = 0
+						slotMap["color"] = color
+						if colorsList != nil {
+							slotMap["colors"] = colorsList
+						} else {
+							slotMap["colors"] = []interface{}{[]interface{}{0, 0, 0, 0}}
+						}
+					}
+				}
+			}
+			self.info = newInfo
+		}
+
+		persistedSlot := map[string]interface{}{
+			"type":      typ,
+			"color":     color,
+			"colors":    colorsList,
+			"sku":       "",
+			"rfid":      1,
+			"source":    2,
+			"icon_type": 0,
+		}
 		self.persistFilamentSlotConfig(index, persistedSlot)
 	}
 }

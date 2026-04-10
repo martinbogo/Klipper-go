@@ -8,21 +8,18 @@
 package project
 
 import (
+	"errors"
 	"fmt"
+	"goklipper/common/logger"
 	"goklipper/common/utils/cast"
 	"goklipper/common/utils/object"
 	"goklipper/common/value"
 	"goklipper/internal/pkg/chelper"
 	heaterpkg "goklipper/internal/pkg/heater"
-	motionpkg "goklipper/internal/pkg/motion"
 	"math"
 	"reflect"
 	"strings"
 )
-
-type extruderStepperAccessor interface {
-	Get_extruder_stepper() *ExtruderStepper
-}
 
 type ExtruderStepper struct {
 	Printer                      *Printer
@@ -123,15 +120,15 @@ func (self *ExtruderStepper) Cmd_default_SET_PRESSURE_ADVANCE(argv interface{}) 
 	//gcmd := argv[0].(*GCodeCommand)
 	toolhead := MustLookupToolhead(self.Printer)
 	extruder := toolhead.Get_extruder()
-	stepperOwner, ok := extruder.(extruderStepperAccessor)
-	if !ok || stepperOwner.Get_extruder_stepper() == nil {
+	activeExtruder, ok := extruder.(interface{ Get_extruder_stepper() *ExtruderStepper })
+	if !ok || activeExtruder.Get_extruder_stepper() == nil {
 		panic("Active extruder does not have a stepper")
 	}
-	strapq := stepperOwner.Get_extruder_stepper().Stepper.Get_trapq()
+	strapq := activeExtruder.Get_extruder_stepper().Stepper.Get_trapq()
 	if strapq != extruder.Get_trapq() {
 		panic("Unable to infer active extruder stepper")
 	}
-	stepperOwner.Get_extruder_stepper().Cmd_SET_PRESSURE_ADVANCE(argv)
+	activeExtruder.Get_extruder_stepper().Cmd_SET_PRESSURE_ADVANCE(argv)
 	return nil
 }
 func (self *ExtruderStepper) Cmd_SET_PRESSURE_ADVANCE(argv interface{}) error {
@@ -221,34 +218,41 @@ func (self *ExtruderStepper) Cmd_SYNC_STEPPER_TO_EXTRUDER(argv interface{}) erro
 
 // Tracking for hotend heater, extrusion motion queue, and extruder stepper
 type PrinterExtruder struct {
-	Printer *Printer
-	*motionpkg.LegacyExtruderRuntime
-	Extruder_stepper *ExtruderStepper
+	Printer           *Printer
+	Name              string
+	Last_position     float64
+	Heater            interface{}
+	Nozzle_diameter   float64
+	Filament_area     float64
+	Max_extrude_ratio float64
+	Max_e_velocity    float64
+	Max_e_accel       float64
+	Max_e_dist        float64
+	Instant_corner_v  float64
+	Trapq             interface{}
+	Trapq_append      func(tq interface{}, print_time,
+		accel_t, cruise_t, decel_t,
+		start_pos_x, start_pos_y, start_pos_z,
+		axes_r_x, axes_r_y, axes_r_z,
+		start_v, cruise_v, accel float64)
+	Trapq_finalize_moves func(interface{}, float64, float64)
+	Extruder_stepper     *ExtruderStepper
 }
 
 func NewPrinterExtruder(config *ConfigWrapper, extruder_num int) *PrinterExtruder {
 	self := &PrinterExtruder{}
 	self.Printer = config.Get_printer()
+	self.Name = config.Get_name()
+	self.Last_position = 0.
 	// Setup hotend heater
 	shared_heater := config.Get("shared_heater", value.None, true)
 	pheaters := self.Printer.Load_object(config, "heaters", object.Sentinel{})
 	gcode_id := fmt.Sprintf("T%d", extruder_num)
-	var heater *heaterpkg.Heater
 	if shared_heater == nil {
-		heater = pheaters.(*heaterpkg.PrinterHeaters).Setup_heater(config, gcode_id)
+		self.Heater = pheaters.(*heaterpkg.PrinterHeaters).Setup_heater(config, gcode_id)
 	} else {
 		config.Deprecate("shared_heater", "")
-		heater = pheaters.(*heaterpkg.PrinterHeaters).Lookup_heater(shared_heater.(string))
-	}
-	self.LegacyExtruderRuntime = &motionpkg.LegacyExtruderRuntime{
-		Name:          config.Get_name(),
-		Last_position: 0.,
-		Heater:        heater,
-		Can_extrude: func() bool {
-			return heater.Can_extrude
-		},
-		Heater_status: heater.Get_status,
-		Heater_stats:  heater.Stats,
+		self.Heater = pheaters.(*heaterpkg.PrinterHeaters).Lookup_heater(shared_heater.(string))
 	}
 	// Setup kinematic checks
 	self.Nozzle_diameter = config.Getfloat("nozzle_diameter", 0, 0, 0, 0., 0, true)
@@ -276,8 +280,6 @@ func NewPrinterExtruder(config *ConfigWrapper, extruder_num int) *PrinterExtrude
 
 		self.Extruder_stepper = NewExtruderStepper(config)
 		self.Extruder_stepper.Stepper.Set_trapq(self.Trapq)
-		self.Stepper_status = self.Extruder_stepper.Get_status
-		self.Find_stepper_past_position = self.Extruder_stepper.Find_past_position
 	}
 	// Register commands
 	gcode := MustLookupGcode(self.Printer)
@@ -294,6 +296,104 @@ func NewPrinterExtruder(config *ConfigWrapper, extruder_num int) *PrinterExtrude
 
 func (self *PrinterExtruder) _PrinterExtruder() {
 	chelper.Trapq_free(self.Trapq)
+}
+func (self *PrinterExtruder) Update_move_time(flush_time float64, clear_history_time float64) {
+	self.Trapq_finalize_moves(self.Trapq, flush_time, clear_history_time)
+}
+func (self *PrinterExtruder) Get_status(eventtime float64) map[string]interface{} {
+	sts := self.Heater.(*heaterpkg.Heater).Get_status(eventtime)
+	statuss := make(map[string]interface{})
+	for k, v := range sts {
+		statuss[k] = v
+	}
+	val := false
+	if self.Heater.(*heaterpkg.Heater).Can_extrude {
+		val = true
+	} else {
+		val = false
+	}
+	statuss["can_extrude"] = val
+	statuss["Nozzle_diameter"] = self.Nozzle_diameter
+	if self.Extruder_stepper != nil {
+		for k, v := range self.Extruder_stepper.Get_status(eventtime) {
+			statuss[k] = v
+		}
+	}
+	return statuss
+}
+func (self *PrinterExtruder) Get_name() string {
+	return self.Name
+}
+func (self *PrinterExtruder) Get_heater() interface{} {
+	return self.Heater
+}
+func (self *PrinterExtruder) Get_trapq() interface{} {
+	return self.Trapq
+}
+func (self *PrinterExtruder) Stats(eventtime float64) (bool, string) {
+	return self.Heater.(*heaterpkg.Heater).Stats(eventtime)
+}
+func (self *PrinterExtruder) Check_move(move *Move) error {
+	axis_r := move.Axes_r[3]
+	if !self.Heater.(*heaterpkg.Heater).Can_extrude {
+		return errors.New("Extrude below minimum temp\n" +
+			"See the 'min_extrude_temp' config option for details")
+	}
+	if (move.Axes_d[0] == 0.0 && move.Axes_d[1] == 0.0) || axis_r < 0. {
+		// Extrude only move (or retraction move) - limit accel and velocity
+		if math.Abs(move.Axes_d[3]) > self.Max_e_dist {
+			return fmt.Errorf(
+				"Extrude only move too long (%.3fmm vs %.3fmm)\n"+
+					"See the 'max_extrude_only_distance' config"+
+					" option for details", move.Axes_d[3], self.Max_e_dist)
+		}
+		inv_extrude_r := 1. / math.Abs(axis_r)
+		move.Limit_speed(self.Max_e_velocity*inv_extrude_r,
+			self.Max_e_accel*inv_extrude_r)
+	} else if axis_r > self.Max_extrude_ratio {
+		if move.Axes_d[3] <= self.Nozzle_diameter*self.Max_extrude_ratio {
+			// Permit extrusion if amount extruded is tiny
+			return nil
+		}
+		area := axis_r * self.Filament_area
+		logger.Debugf("Overextrude: %f vs %f (area=%.3f dist=%.3f)",
+			axis_r, self.Max_extrude_ratio, area, move.Move_d)
+		return fmt.Errorf("Move exceeds maximum extrusion (%.3fmm^2 vs %.3fmm^2)\n"+
+				"See the 'max_extrude_cross_section' config option for details",
+			area, self.Max_extrude_ratio*self.Filament_area)
+	}
+	return nil
+}
+func (self *PrinterExtruder) Calc_junction(prev_move, move *Move) float64 {
+	diff_r := move.Axes_r[3] - prev_move.Axes_r[3]
+	if diff_r != 0.0 {
+		return math.Pow(self.Instant_corner_v/math.Abs(diff_r), 2)
+	}
+	return move.Max_cruise_v2
+}
+
+func (self *PrinterExtruder) Move(print_time float64, move *Move) {
+	axis_r := move.Axes_r[3]
+	accel := move.Accel * axis_r
+	start_v := move.Start_v * axis_r
+	cruise_v := move.Cruise_v * axis_r
+	can_pressure_advance := 0.0
+	if axis_r > 0. && (move.Axes_d[0] != 0.0 || move.Axes_d[1] != 0.0) {
+		can_pressure_advance = 1.0
+	}
+	//# Queue movement (x is extruder movement, y is pressure advance flag)
+	self.Trapq_append(self.Trapq, print_time,
+		move.Accel_t, move.Cruise_t, move.Decel_t,
+		move.Start_pos[3], 0., 0.,
+		1., can_pressure_advance, 0.,
+		start_v, cruise_v, accel)
+	self.Last_position = move.End_pos[3]
+}
+func (self *PrinterExtruder) Find_past_position(print_time float64) float64 {
+	if self.Extruder_stepper == nil {
+		return 0.
+	}
+	return self.Extruder_stepper.Find_past_position(print_time)
 }
 func (self *PrinterExtruder) Cmd_M104(gcmd interface{}) error {
 	// Set Extruder Temperature
@@ -366,9 +466,37 @@ func (self *PrinterExtruder) Get_extruder_stepper() *ExtruderStepper {
 }
 
 // Dummy extruder class used when a printer has no extruder at all
-func NewDummyExtruder(printer *Printer) *motionpkg.DummyExtruder {
-	_ = printer
-	return motionpkg.NewDummyExtruder()
+type DummyExtruder struct {
+	Printer *Printer
+}
+
+func NewDummyExtruder(printer *Printer) *DummyExtruder {
+	self := &DummyExtruder{}
+	self.Printer = printer
+	return self
+}
+func (self *DummyExtruder) Update_move_time(flush_time float64, clear_history_time float64) {}
+func (self *DummyExtruder) Check_move(move *Move) error {
+	return move.Move_error("Extrude when no extruder present")
+}
+func (self *DummyExtruder) Find_past_position(print_time float64) float64 {
+	return 0.
+}
+func (self *DummyExtruder) Calc_junction(prev_move, move *Move) float64 {
+	return move.Max_cruise_v2
+}
+func (self *DummyExtruder) Move(print_time float64, move *Move) {}
+func (self *DummyExtruder) Get_name() string {
+	return ""
+}
+func (self *DummyExtruder) Get_heater() interface{} {
+	panic("Extruder not configured")
+}
+func (self *DummyExtruder) Get_trapq() interface{} {
+	panic("Extruder not configured")
+}
+func (self *DummyExtruder) Get_extruder_stepper() *ExtruderStepper {
+	panic("Extruder not configured")
 }
 
 func Add_printer_objects_extruder(config *ConfigWrapper) {
