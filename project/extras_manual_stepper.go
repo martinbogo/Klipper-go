@@ -2,7 +2,6 @@ package project
 
 import (
 	"goklipper/common/utils/object"
-	"goklipper/internal/pkg/chelper"
 	mcupkg "goklipper/internal/pkg/mcu"
 	motionpkg "goklipper/internal/pkg/motion"
 	"strings"
@@ -15,14 +14,8 @@ type ManualStepper struct {
 	velocity      float64
 	accel         float64
 	homing_accel  float64
-	next_cmd_time float64
-
-	trapq        interface{}
-	trapq_append func(tq interface{}, print_time, accel_t, cruise_t, decel_t,
-		start_pos_x, start_pos_y, start_pos_z, axes_r_x, axes_r_y,
-		axes_r_z, start_v, cruise_v, accel float64)
-	trapq_finalize_moves func(interface{}, float64, float64)
-	can_home             bool
+	motionCore    *motionpkg.ManualStepperCore
+	can_home      bool
 }
 
 // NewManualStepper is the constructor for ManualStepper
@@ -46,15 +39,10 @@ func NewManualStepper(config *ConfigWrapper) *ManualStepper {
 	self.velocity = config.Getfloat("velocity", 5.0, 0, 0, 0, 0, true)
 	self.accel = config.Getfloat("accel", 0.0, 0, 0, 0, 0, true)
 	self.homing_accel = self.accel
-	self.next_cmd_time = 0.0
-
-	// Setup iterative solver
-	self.trapq = chelper.Trapq_alloc()
-	self.trapq_append = chelper.Trapq_append
-	self.trapq_finalize_moves = chelper.Trapq_finalize_moves
+	self.motionCore = motionpkg.NewManualStepperCore()
 
 	self.rail.Setup_itersolve("cartesian_stepper_alloc", uint8('x'))
-	self.rail.Set_trapq(self.trapq)
+	self.rail.Set_trapq(self.motionCore.Trapq())
 
 	// Register commands
 	stepper_name := strings.Split(config.Get_name(), " ")[1]
@@ -68,25 +56,24 @@ func NewManualStepper(config *ConfigWrapper) *ManualStepper {
 func (self *ManualStepper) sync_print_time() {
 	toolhead := MustLookupToolhead(self.printer)
 	printTime := toolhead.Get_last_move_time()
-	if self.next_cmd_time > printTime {
-		toolhead.Dwell(self.next_cmd_time - printTime)
-	} else {
-		self.next_cmd_time = printTime
+	if delay := self.motionCore.SyncPrintTime(printTime); delay > 0 {
+		toolhead.Dwell(delay)
 	}
 }
 
 func (self *ManualStepper) do_enable(enable bool) {
 	self.sync_print_time()
 	stepperEnable := self.printer.Lookup_object("stepper_enable", object.Sentinel{}).(*mcupkg.PrinterStepperEnableModule)
+	printTime := self.motionCore.NextCmdTime()
 	if enable {
 		for _, s := range self.steppers {
 			se, _ := stepperEnable.Lookup_enable(s.Get_name(false))
-			se.Motor_enable(self.next_cmd_time)
+			se.Motor_enable(printTime)
 		}
 	} else {
 		for _, s := range self.steppers {
 			se, _ := stepperEnable.Lookup_enable(s.Get_name(false))
-			se.Motor_disable(self.next_cmd_time)
+			se.Motor_disable(printTime)
 		}
 	}
 	self.sync_print_time()
@@ -99,16 +86,11 @@ func (self *ManualStepper) do_set_position(setpos float64) {
 func (self *ManualStepper) do_move(movepos, speed, accel float64, sync bool) {
 	self.sync_print_time()
 	cp := self.rail.Get_commanded_position()
-	dist := movepos - cp
-	axisR, accel_t, cruise_t, cruiseV := motionpkg.CalcMoveTime(dist, speed, &accel)
-	self.trapq_append(self.trapq, self.next_cmd_time, accel_t, cruise_t, accel_t,
-		cp, 0, 0, axisR, 0, 0,
-		0, cruiseV, accel)
-	self.next_cmd_time += accel_t + cruise_t + accel_t
-	self.rail.Generate_steps(self.next_cmd_time)
-	self.trapq_finalize_moves(self.trapq, self.next_cmd_time+99999.9, self.next_cmd_time+99999.9)
+	moveEndTime := self.motionCore.QueueMove(cp, movepos, speed, accel)
+	self.rail.Generate_steps(moveEndTime)
+	self.motionCore.FinalizeMoves()
 	toolhead := self.printer.Lookup_object("toolhead", object.Sentinel{}).(*Toolhead)
-	toolhead.Note_mcu_movequeue_activity(self.next_cmd_time, false)
+	toolhead.Note_mcu_movequeue_activity(moveEndTime, false)
 	if sync {
 		self.sync_print_time()
 	}
@@ -183,7 +165,7 @@ func (self *ManualStepper) Note_z_not_homed() {
 
 func (self *ManualStepper) Get_last_move_time() float64 {
 	self.sync_print_time()
-	return self.next_cmd_time
+	return self.motionCore.NextCmdTime()
 }
 
 func ManualStepper_max(x, y float64) float64 {
@@ -194,7 +176,7 @@ func ManualStepper_max(x, y float64) float64 {
 }
 
 func (self *ManualStepper) Dwell(delay float64) {
-	self.next_cmd_time += ManualStepper_max(0.0, delay)
+	self.motionCore.Dwell(ManualStepper_max(0.0, delay))
 }
 
 func (self *ManualStepper) Drip_move(newpos []float64, speed float64, drip_completion *ReactorCompletion) error {

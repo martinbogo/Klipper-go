@@ -1,21 +1,18 @@
 package project
 
-import printerpkg "goklipper/internal/pkg/printer"
+import (
+	moduleinitpkg "goklipper/internal/pkg/moduleinit"
+	printerpkg "goklipper/internal/pkg/printer"
+)
 
 func LoadMainModule() *printerpkg.ModuleRegistry {
 	module := printerpkg.NewModuleRegistry()
 	registerProjectModules(module)
-	registerInternalModules(module)
+	moduleinitpkg.RegisterInternalModules(module)
 	return module
 }
 
 func registerConfigWrapperModule(module *printerpkg.ModuleRegistry, name string, init func(*ConfigWrapper) interface{}) {
-	module.Register(name, func(section interface{}) interface{} {
-		return init(section.(*ConfigWrapper))
-	})
-}
-
-func registerModuleConfigModule(module *printerpkg.ModuleRegistry, name string, init func(printerpkg.ModuleConfig) interface{}) {
 	module.Register(name, func(section interface{}) interface{} {
 		return init(section.(*ConfigWrapper))
 	})

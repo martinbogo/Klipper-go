@@ -2,6 +2,7 @@ package print
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -600,6 +601,29 @@ func (h *LeviQ3Helper) RestorePersistentState(state LeviQ3PersistentState) {
 	if state.SavedMesh != nil {
 		h.probed_matrix = state.SavedMesh
 	}
+}
+
+func (h *LeviQ3Helper) RestorePersistentStateFromJSON(payload []byte) error {
+	if h == nil {
+		return errors.New("nil LeviQ3Helper")
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	var state LeviQ3PersistedStateRecord
+	if err := json.Unmarshal(payload, &state); err != nil {
+		return err
+	}
+	h.RestorePersistentState(state.PersistentState())
+	return nil
+}
+
+func (h *LeviQ3Helper) PersistentStateJSON() ([]byte, error) {
+	if h == nil {
+		return nil, errors.New("nil LeviQ3Helper")
+	}
+	persisted := NewLeviQ3PersistedStateRecord(h.CurrentZOffset(), h.PersistentState())
+	return json.Marshal(persisted)
 }
 
 func (h *LeviQ3Helper) MeshBuildParams() map[string]interface{} {

@@ -267,7 +267,7 @@ func (self *Printer) Webhooks() printerpkg.WebhookRegistry {
 	if !ok {
 		panic(fmt.Errorf("lookup object %s type invalid: %#v", "webhooks", self.Lookup_object("webhooks", object.Sentinel{})))
 	}
-	return webhooks
+	return &webhookRegistryAdapter{webhooks: webhooks}
 }
 func (self *Printer) Lookup_objects(module string) []interface{} {
 	return self.runtime.LookupObjects(module)
@@ -334,6 +334,38 @@ func (self *heaterRuntimeAdapter) GetTemperature(eventtime float64) (float64, fl
 
 type heaterManagerAdapter struct {
 	heaters *heaterpkg.PrinterHeaters
+}
+
+type webhookRequestAdapter struct {
+	request *WebRequest
+}
+
+func (self *webhookRequestAdapter) String(name string, defaultValue string) string {
+	return self.request.Get_str(name, defaultValue)
+}
+
+func (self *webhookRequestAdapter) Float(name string, defaultValue float64) float64 {
+	return self.request.Get_float(name, defaultValue)
+}
+
+func (self *webhookRequestAdapter) Int(name string, defaultValue int) int {
+	return self.request.Get_int(name, defaultValue)
+}
+
+type webhookRegistryAdapter struct {
+	webhooks *WebHooks
+}
+
+func (self *webhookRegistryAdapter) RegisterEndpoint(path string, handler func() (interface{}, error)) error {
+	return self.webhooks.Register_endpoint(path, func(_ *WebRequest) (interface{}, error) {
+		return handler()
+	})
+}
+
+func (self *webhookRegistryAdapter) RegisterEndpointWithRequest(path string, handler func(printerpkg.WebhookRequest) (interface{}, error)) error {
+	return self.webhooks.Register_endpoint(path, func(request *WebRequest) (interface{}, error) {
+		return handler(&webhookRequestAdapter{request: request})
+	})
 }
 
 func (self *heaterManagerAdapter) LookupHeater(name string) interface{} {

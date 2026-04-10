@@ -202,6 +202,46 @@ func TestPersistentStateRoundTripPreservesCurrentZOffset(t *testing.T) {
 	}
 }
 
+func TestPersistentStateJSONRoundTripPreservesCurrentZOffset(t *testing.T) {
+	helper := newTestLeviQ3Helper(t, nil, MapConfigSource{})
+	mesh := NewBedMesh(XY{X: 5, Y: 5}, XY{X: 25, Y: 25}, XYCount{X: 2, Y: 2}, "json-round-trip")
+	mesh.Set(0, 0, 0.31)
+	mesh.Set(1, 0, 0.32)
+	mesh.Set(0, 1, 0.33)
+	mesh.Set(1, 1, 0.34)
+	helper.RestorePersistentState(LeviQ3PersistentState{
+		SavedZOffset:           0.42,
+		LastAutoZOffset:        0.43,
+		LastAutoZOffsetRaw:     0.04,
+		LastAutoZOffsetSamples: []float64{0.04, 0.05, 0.06},
+		LastAppliedOffsets:     XYZ{X: 1, Y: 2, Z: 0.42},
+		SavedMesh:              mesh,
+	})
+
+	payload, err := helper.PersistentStateJSON()
+	if err != nil {
+		t.Fatalf("PersistentStateJSON() error = %v", err)
+	}
+
+	restored := newTestLeviQ3Helper(t, nil, MapConfigSource{})
+	if err := restored.RestorePersistentStateFromJSON(payload); err != nil {
+		t.Fatalf("RestorePersistentStateFromJSON() error = %v", err)
+	}
+	if math.Abs(restored.CurrentZOffset()-0.42) > 1e-9 {
+		t.Fatalf("CurrentZOffset() = %v, want 0.42", restored.CurrentZOffset())
+	}
+	roundTrip := restored.PersistentState()
+	if roundTrip.LastAppliedOffsets != (XYZ{X: 1, Y: 2, Z: 0.42}) {
+		t.Fatalf("LastAppliedOffsets = %#v", roundTrip.LastAppliedOffsets)
+	}
+	if roundTrip.SavedMesh == nil {
+		t.Fatal("expected saved mesh after JSON restore")
+	}
+	if !reflect.DeepEqual(roundTrip.SavedMesh.CloneMatrix(), mesh.CloneMatrix()) {
+		t.Fatalf("saved mesh matrix = %#v, want %#v", roundTrip.SavedMesh.CloneMatrix(), mesh.CloneMatrix())
+	}
+}
+
 func TestBedMeshSnapshotRoundTripPreservesMatrixAndPoints(t *testing.T) {
 	mesh := NewBedMesh(XY{X: 10, Y: 20}, XY{X: 30, Y: 40}, XYCount{X: 2, Y: 2}, "snapshot-test")
 	mesh.Set(0, 0, 0.21)

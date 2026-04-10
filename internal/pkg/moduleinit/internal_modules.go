@@ -1,4 +1,4 @@
-package project
+package moduleinit
 
 import (
 	addonpkg "goklipper/internal/addon"
@@ -15,7 +15,7 @@ import (
 	printpkg "goklipper/internal/print"
 )
 
-func registerInternalModules(module *printerpkg.ModuleRegistry) {
+func RegisterInternalModules(module *printerpkg.ModuleRegistry) {
 	for _, item := range []struct {
 		name string
 		init func(printerpkg.ModuleConfig) interface{}
@@ -59,6 +59,8 @@ func registerInternalModules(module *printerpkg.ModuleRegistry) {
 		{name: "filament_switch_sensor filament_sensor", init: iopkg.LoadConfigSwitchSensor},
 		{name: "output_pin", init: iopkg.LoadConfigPrefixDigitalOut},
 	} {
-		registerModuleConfigModule(module, item.name, item.init)
+		module.Register(item.name, func(section interface{}) interface{} {
+			return item.init(section.(printerpkg.ModuleConfig))
+		})
 	}
 }

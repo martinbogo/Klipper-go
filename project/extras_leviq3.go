@@ -347,7 +347,7 @@ func (self *LeviQ3Module) runLeviQ3Command(fn func(context.Context) error) error
 }
 
 func (self *LeviQ3Module) loadPersistentState() error {
-	if self.saveVars == nil {
+	if self.saveVars == nil || self.helper == nil {
 		return nil
 	}
 	raw := self.saveVars.Variables()[leviq3StateVariable]
@@ -358,20 +358,14 @@ func (self *LeviQ3Module) loadPersistentState() error {
 	if err != nil {
 		return err
 	}
-	var state printpkg.LeviQ3PersistedStateRecord
-	if err := json.Unmarshal(payload, &state); err != nil {
-		return err
-	}
-	self.helper.RestorePersistentState(state.PersistentState())
-	return nil
+	return self.helper.RestorePersistentStateFromJSON(payload)
 }
 
 func (self *LeviQ3Module) persistState() error {
-	if self.saveVars == nil || self.gcode == nil {
+	if self.saveVars == nil || self.gcode == nil || self.helper == nil {
 		return nil
 	}
-	persisted := printpkg.NewLeviQ3PersistedStateRecord(self.helper.CurrentZOffset(), self.helper.PersistentState())
-	payload, err := json.Marshal(persisted)
+	payload, err := self.helper.PersistentStateJSON()
 	if err != nil {
 		return err
 	}

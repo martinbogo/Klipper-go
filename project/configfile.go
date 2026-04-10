@@ -181,11 +181,9 @@ func (self *ConfigWrapper) Getint64(option string, default1 interface{}, minval,
 	n := v.(int64)
 	if minval != 0 && n < minval {
 		panic(fmt.Errorf("Option '%s' in section '%s' must have minimum of %d", option, self.Section, minval))
-		return minval
 	}
 	if maxval != 0 && n > maxval {
 		panic(fmt.Errorf("Option '%s' in section '%s' must have maximum of %d", option, self.Section, maxval))
-		return maxval
 	}
 	return n
 }
