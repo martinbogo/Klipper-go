@@ -68,7 +68,7 @@ func (self *Move) CalcEndstopRate(endstop Endstop, movepos []float64, speed floa
 		stepCount := math.Abs(stepper.CalcPositionFromCoord(startpos)-stepper.CalcPositionFromCoord(movepos)) / stepper.GetStepDist()
 		maxSteps = math.Max(stepCount, maxSteps)
 	}
-	if maxSteps < 0 {
+	if maxSteps <= 0 {
 		return .001
 	}
 	return moveT / maxSteps

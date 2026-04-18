@@ -41,18 +41,18 @@ var TMC2130Fields = map[string]map[string]int64{
 		"ihold": 0x1f << 0, "irun": 0x1f << 8, "iholddelay": 0x0f << 16,
 	},
 	"TPOWERDOWN": {"tpowerdown": 0xff},
-	"TSTEP": {"tstep": 0xfffff},
-	"TPWMTHRS": {"tpwmthrs": 0xfffff},
-	"TCOOLTHRS": {"tcoolthrs": 0xfffff},
-	"THIGH": {"thigh": 0xfffff},
-	"MSLUT0": {"mslut0": 0xffffffff},
-	"MSLUT1": {"mslut1": 0xffffffff},
-	"MSLUT2": {"mslut2": 0xffffffff},
-	"MSLUT3": {"mslut3": 0xffffffff},
-	"MSLUT4": {"mslut4": 0xffffffff},
-	"MSLUT5": {"mslut5": 0xffffffff},
-	"MSLUT6": {"mslut6": 0xffffffff},
-	"MSLUT7": {"mslut7": 0xffffffff},
+	"TSTEP":      {"tstep": 0xfffff},
+	"TPWMTHRS":   {"tpwmthrs": 0xfffff},
+	"TCOOLTHRS":  {"tcoolthrs": 0xfffff},
+	"THIGH":      {"thigh": 0xfffff},
+	"MSLUT0":     {"mslut0": 0xffffffff},
+	"MSLUT1":     {"mslut1": 0xffffffff},
+	"MSLUT2":     {"mslut2": 0xffffffff},
+	"MSLUT3":     {"mslut3": 0xffffffff},
+	"MSLUT4":     {"mslut4": 0xffffffff},
+	"MSLUT5":     {"mslut5": 0xffffffff},
+	"MSLUT6":     {"mslut6": 0xffffffff},
+	"MSLUT7":     {"mslut7": 0xffffffff},
 	"MSLUTSEL": {
 		"x3": 0xFF << 24,
 		"x2": 0xFF << 16,
@@ -66,7 +66,7 @@ var TMC2130Fields = map[string]map[string]int64{
 		"start_sin":   0xFF << 0,
 		"start_sin90": 0xFF << 16,
 	},
-	"MSCNT": {"mscnt": 0x3ff},
+	"MSCNT":    {"mscnt": 0x3ff},
 	"MSCURACT": {"cur_a": 0x1ff, "cur_b": 0x1ff << 16},
 	"CHOPCONF": {
 		"toff": 0x0f, "hstrt": 0x07 << 4, "hend": 0x0f << 7, "fd3": 1 << 11,
@@ -87,7 +87,7 @@ var TMC2130Fields = map[string]map[string]int64{
 		"pwm_ampl": 0xff, "pwm_grad": 0xff << 8, "pwm_freq": 0x03 << 16,
 		"pwm_autoscale": 1 << 18, "pwm_symmetric": 1 << 19, "freewheel": 0x03 << 20,
 	},
-	"PWM_SCALE": {"pwm_scale": 0xff},
+	"PWM_SCALE":  {"pwm_scale": 0xff},
 	"LOST_STEPS": {"lost_steps": 0xfffff},
 }
 
@@ -176,11 +176,20 @@ func ConfigureTMC2130(config ConfigFieldSource, fields *FieldHelper) {
 	setConfigField(config, "hstrt", 0)
 	setConfigField(config, "hend", 7)
 	setConfigField(config, "tbl", 1)
+	setConfigField(config, "vhighfs", 0)
+	setConfigField(config, "vhighchm", 0)
+	setConfigField(config, "semin", 0)
+	setConfigField(config, "seup", 0)
+	setConfigField(config, "semax", 0)
+	setConfigField(config, "sedn", 0)
+	setConfigField(config, "seimin", 0)
 	setConfigField(config, "sgt", 0)
+	setConfigField(config, "sfilt", 0)
 	setConfigField(config, "iholddelay", 8)
 	setConfigField(config, "pwm_ampl", 128)
 	setConfigField(config, "pwm_grad", 4)
 	setConfigField(config, "pwm_freq", 1)
 	setConfigField(config, "pwm_autoscale", true)
+	setConfigField(config, "freewheel", 0)
 	setConfigField(config, "tpowerdown", 0)
 }

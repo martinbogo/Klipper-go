@@ -36,9 +36,7 @@ func Set_nonblock(fd int) {
 
 // Clear HUPCL flag
 func Clear_hupcl(fd uintptr) {
-	//attrs := termios.tcgetattr(fd)
-	//attrs[2] = attrs[2] &   (- ( termios.HUPCL + 1))
-	//termios.tcsetattr(fd, termios.TCSADRAIN, attrs)
+	clearHUPCLImpl(fd)
 }
 
 // Support for creating a pseudo-tty for emulating a serial port

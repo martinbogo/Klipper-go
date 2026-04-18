@@ -23,7 +23,7 @@ func FindAutosaveData(data string) (string, string) {
 		autosave_data = strings.TrimSpace(data[pos+len(AutosaveHeader):])
 	}
 	// Check for errors and strip line prefixes
-	if strings.Index(regular_data, "\n#*# ") != -1 {
+	if strings.Contains(regular_data, "\n#*# ") {
 		logger.Debug("Can't read autosave from config file - autosave state corrupted")
 		return data, ""
 	}

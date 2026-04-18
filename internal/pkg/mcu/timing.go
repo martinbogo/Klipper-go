@@ -2,6 +2,7 @@ package mcu
 
 import (
 	"errors"
+	"fmt"
 	"math"
 )
 
@@ -54,6 +55,12 @@ type MoveQueueTimingState struct {
 	IsTimeout bool
 }
 
+type MoveQueueTimeoutPlan struct {
+	TimedOut        bool
+	ShutdownMessage string
+	LogMessage      string
+}
+
 func (self *MoveQueueTimingState) CheckActive(printTime float64, eventtime float64, source MoveQueueTimingSource, sync StepperSync) bool {
 	if sync == nil {
 		return false
@@ -65,6 +72,18 @@ func (self *MoveQueueTimingState) CheckActive(printTime float64, eventtime float
 	}
 	self.IsTimeout = true
 	return true
+}
+
+func BuildMoveQueueTimeoutPlan(timedOut bool, mcuName string, eventtime float64) MoveQueueTimeoutPlan {
+	if !timedOut {
+		return MoveQueueTimeoutPlan{}
+	}
+	shutdownMessage := fmt.Sprintf("Lost communication with MCU %s", mcuName)
+	return MoveQueueTimeoutPlan{
+		TimedOut:        true,
+		ShutdownMessage: shutdownMessage,
+		LogMessage:      fmt.Sprintf("Timeout with MCU '%s' (eventtime=%f), ERROR:%s", mcuName, eventtime, shutdownMessage),
+	}
 }
 
 type StepGenerationOps interface {

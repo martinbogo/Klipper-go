@@ -115,10 +115,14 @@ func (self *ManualProbeSession) ReportZStatus(warnNoChange bool, prevPos float64
 			nextStr = fmt.Sprintf("%.3f", nextPosVal)
 		}
 		self.runtime.SetStatus(map[string]interface{}{
-			"isActive":       true,
-			"zPosition":      zPos,
-			"zPositionLower": prevPosVal,
-			"zPositionUpper": nextPosVal,
+			"is_active":        true,
+			"z_position":       zPos,
+			"z_position_lower": prevPosVal,
+			"z_position_upper": nextPosVal,
+			"isActive":         true,
+			"zPosition":        zPos,
+			"zPositionLower":   prevPosVal,
+			"zPositionUpper":   nextPosVal,
 		})
 		self.gcode.RespondInfo(fmt.Sprintf("Z position: %s --> %.3f <-- %s", prevStr, zPos, nextStr), true)
 	}

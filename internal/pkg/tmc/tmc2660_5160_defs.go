@@ -405,6 +405,10 @@ var TMC5160Fields = map[string]map[string]int64{
 		"w1": 0x03 << 2,
 		"w0": 0x03 << 0,
 	},
+	"MSLUTSTART": {
+		"start_sin":   0xFF << 0,
+		"start_sin90": 0xFF << 16,
+	},
 	"MSCNT": {
 		"mscnt": 0x3ff << 0,
 	},
@@ -444,6 +448,9 @@ var TMC5160Fields = map[string]map[string]int64{
 	},
 	"TCOOLTHRS": {
 		"tcoolthrs": 0xfffff << 0,
+	},
+	"THIGH": {
+		"thigh": 0xfffff << 0,
 	},
 	"TSTEP": {
 		"tstep": 0xfffff << 0,

@@ -104,6 +104,31 @@ func containsString(items []string, want string) bool {
 	return false
 }
 
+func toolheadMinimumCruiseRatio(status map[string]interface{}) float64 {
+	if ratio, ok := status["minimum_cruise_ratio"].(float64); ok {
+		if ratio < 0.0 {
+			return 0.0
+		}
+		if ratio > 1.0 {
+			return 1.0
+		}
+		return ratio
+	}
+	maxAccel, maxAccelOK := status["max_accel"].(float64)
+	maxAccelToDecel, accelToDecelOK := status["max_accel_to_decel"].(float64)
+	if !maxAccelOK || !accelToDecelOK || maxAccel <= 0.0 {
+		return 0.0
+	}
+	ratio := 1.0 - maxAccelToDecel/maxAccel
+	if ratio < 0.0 {
+		return 0.0
+	}
+	if ratio > 1.0 {
+		return 1.0
+	}
+	return ratio
+}
+
 type VibrationPulseTest struct {
 	printer      printerpkg.ModulePrinter
 	gcode        printerpkg.GCodeRuntime
@@ -156,10 +181,10 @@ func (self *VibrationPulseTest) Run_test(axis *TestAxis, gcmd printerpkg.Command
 	freq := self.freq_start
 	systime := self.printer.Reactor().Monotonic()
 	toolheadInfo := toolhead.Get_status(systime)
-	oldMaxAccel := toolheadInfo["max_accel"]
-	oldMaxAccelToDecel := toolheadInfo["max_accel_to_decel"]
+	oldMaxAccel, _ := toolheadInfo["max_accel"].(float64)
+	oldMinimumCruiseRatio := toolheadMinimumCruiseRatio(toolheadInfo)
 	maxAccel := self.freq_end * self.accel_per_hz
-	self.gcode.RunScriptFromCommand(fmt.Sprintf("SET_VELOCITY_LIMIT ACCEL=%.3f ACCEL_TO_DECEL=%.3f", maxAccel, maxAccel))
+	self.gcode.RunScriptFromCommand(fmt.Sprintf("SET_VELOCITY_LIMIT ACCEL=%.3f MINIMUM_CRUISE_RATIO=0.000", maxAccel))
 
 	inputShaperObj := self.printer.LookupObject("input_shaper", nil)
 	var inputShaper *InputShaper
@@ -189,7 +214,7 @@ func (self *VibrationPulseTest) Run_test(axis *TestAxis, gcmd printerpkg.Command
 		}
 	}
 
-	self.gcode.RunScriptFromCommand(fmt.Sprintf("SET_VELOCITY_LIMIT ACCEL=%.3f ACCEL_TO_DECEL=%.3f", oldMaxAccel, oldMaxAccelToDecel))
+	self.gcode.RunScriptFromCommand(fmt.Sprintf("SET_VELOCITY_LIMIT ACCEL=%.3f MINIMUM_CRUISE_RATIO=%.3f", oldMaxAccel, oldMinimumCruiseRatio))
 	if inputShaper != nil {
 		inputShaper.Enable_shaping()
 		cmd.RespondInfo("Re-enabled [input_shaper]", true)
@@ -232,7 +257,7 @@ func NewResonanceTester(config printerpkg.ModuleConfig) *ResonanceTester {
 			self.accel_chip_names = [][2]string{{"xy", self.accel_chip_names[0][1]}}
 		}
 	}
-	self.max_smoothing = cfg.Getfloat("max_smoothing", object.Sentinel{}, 0.05, 0, 0, 0, true)
+	self.max_smoothing = cfg.Getfloat("max_smoothing", 0., 0.05, 0, 0, 0, true)
 	self.gcode = self.printer.GCode()
 	self.gcode.RegisterCommand("MEASURE_AXES_NOISE", self.Cmd_MEASURE_AXES_NOISE, false, cmd_MEASURE_AXES_NOISE_help)
 	self.gcode.RegisterCommand("TEST_RESONANCES", self.Cmd_TEST_RESONANCES, false, cmd_TEST_RESONANCES_help)

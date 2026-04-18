@@ -160,9 +160,16 @@ func (self *Runtime) SendEvent(event string, params []interface{}) ([]interface{
 
 func (self *Runtime) RequestExit(result string) {
 	if self.runResult == "" {
+		logger.Infof("runtime: request exit -> %s", result)
 		self.runResult = result
+	} else {
+		logger.Infof("runtime: request exit ignored, existing result=%s new=%s", self.runResult, result)
 	}
 	self.reactor.End()
+}
+
+func (self *Runtime) ExitResult() string {
+	return self.runResult
 }
 
 func (self *Runtime) InvokeShutdown(msg interface{}) interface{} {
@@ -199,13 +206,16 @@ func (self *Runtime) Run() string {
 		}
 	}
 	runResult := self.runResult
+	logger.Infof("runtime: reactor loop ended with result=%q", runResult)
 	if runResult == "firmware_restart" {
+		logger.Infof("runtime: dispatching project:firmware_restart")
 		_, err := self.SendEvent("project:firmware_restart", nil)
 		if err != nil {
 			logger.Error("Unhandled exception during post run")
 			return runResult
 		}
 	}
+	logger.Infof("runtime: dispatching project:disconnect")
 	_, err = self.SendEvent("project:disconnect", nil)
 	if err != nil {
 		logger.Error("Unhandled exception during post run")

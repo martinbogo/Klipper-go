@@ -26,12 +26,14 @@ func BuildConfigPlan(oidCount int, configCmds []string, restartCmds []string, in
 		return updated
 	}
 	resolvedConfigCmds := append([]string{fmt.Sprintf("allocate_oids count=%d", oidCount)}, applyUpdate(configCmds)...)
+	resolvedRestartCmds := applyUpdate(restartCmds)
+	resolvedInitCmds := applyUpdate(initCmds)
 	configCRC := crc32.ChecksumIEEE([]byte(strings.Join(resolvedConfigCmds, "\n"))) & 0xffffffff
 	resolvedConfigCmds = append(resolvedConfigCmds, fmt.Sprintf("finalize_config crc=%d", configCRC))
 	return ConfigBuildPlan{
 		ConfigCmds:  resolvedConfigCmds,
-		RestartCmds: applyUpdate(restartCmds),
-		InitCmds:    applyUpdate(initCmds),
+		RestartCmds: resolvedRestartCmds,
+		InitCmds:    resolvedInitCmds,
 		ConfigCRC:   configCRC,
 	}
 }
@@ -51,6 +53,15 @@ type ConnectionPlan struct {
 	RTS                   bool
 	NeedsPowerEnableReset bool
 	NeedsClockSyncConnect bool
+}
+
+type ConnectionExecutionHooks struct {
+	ConnectFileoutput func()
+	ConnectCanbus     func()
+	ConnectRemote     func(serialPort string)
+	ConnectUART       func(serialPort string, baud int, rts bool)
+	ConnectPipe       func(serialPort string)
+	ConnectClockSync  func()
 }
 
 func BuildConnectionPlan(isFileoutput bool, restartMethod string, serialPort string, baud int, hasCanbus bool, serialPathExists bool) ConnectionPlan {
@@ -75,4 +86,32 @@ func BuildConnectionPlan(isFileoutput bool, restartMethod string, serialPort str
 	}
 	plan.Mode = ConnectionModePipe
 	return plan
+}
+
+func ExecuteConnectionPlan(plan ConnectionPlan, serialPort string, baud int, hooks ConnectionExecutionHooks) {
+	switch plan.Mode {
+	case ConnectionModeFileoutput:
+		if hooks.ConnectFileoutput != nil {
+			hooks.ConnectFileoutput()
+		}
+	case ConnectionModeCanbus:
+		if hooks.ConnectCanbus != nil {
+			hooks.ConnectCanbus()
+		}
+	case ConnectionModeRemote:
+		if hooks.ConnectRemote != nil {
+			hooks.ConnectRemote(serialPort)
+		}
+	case ConnectionModeUART:
+		if hooks.ConnectUART != nil {
+			hooks.ConnectUART(serialPort, baud, plan.RTS)
+		}
+	default:
+		if hooks.ConnectPipe != nil {
+			hooks.ConnectPipe(serialPort)
+		}
+	}
+	if plan.NeedsClockSyncConnect && hooks.ConnectClockSync != nil {
+		hooks.ConnectClockSync()
+	}
 }

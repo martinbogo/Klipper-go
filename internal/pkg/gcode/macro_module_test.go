@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"goklipper/common/value"
 	printerpkg "goklipper/internal/pkg/printer"
 )
 
@@ -15,7 +16,7 @@ type fakeMacroConfig struct {
 	template      *fakeMacroTemplate
 }
 
-func (self *fakeMacroConfig) Name() string { return self.name }
+func (self *fakeMacroConfig) Name() string     { return self.name }
 func (self *fakeMacroConfig) Get_name() string { return self.name }
 func (self *fakeMacroConfig) String(option string, defaultValue string, noteValid bool) string {
 	if value, ok := self.values[option]; ok {
@@ -23,10 +24,10 @@ func (self *fakeMacroConfig) String(option string, defaultValue string, noteVali
 	}
 	return defaultValue
 }
-func (self *fakeMacroConfig) Bool(option string, defaultValue bool) bool { return defaultValue }
+func (self *fakeMacroConfig) Bool(option string, defaultValue bool) bool        { return defaultValue }
 func (self *fakeMacroConfig) Float(option string, defaultValue float64) float64 { return defaultValue }
-func (self *fakeMacroConfig) OptionalFloat(option string) *float64 { return nil }
-func (self *fakeMacroConfig) LoadObject(section string) interface{} { return nil }
+func (self *fakeMacroConfig) OptionalFloat(option string) *float64              { return nil }
+func (self *fakeMacroConfig) LoadObject(section string) interface{}             { return nil }
 func (self *fakeMacroConfig) LoadTemplate(module string, option string, defaultValue string) printerpkg.Template {
 	return self.template
 }
@@ -45,30 +46,53 @@ func (self *fakeMacroConfig) Get_prefix_options(prefix string) []string { return
 type fakeMacroPrinter struct {
 	gcode         *fakeMacroGCode
 	eventHandlers map[string]func([]interface{}) error
+	webhooks      printerpkg.WebhookRegistry
 }
 
-func (self *fakeMacroPrinter) LookupObject(name string, defaultValue interface{}) interface{} { return nil }
+func (self *fakeMacroPrinter) LookupObject(name string, defaultValue interface{}) interface{} {
+	return nil
+}
 func (self *fakeMacroPrinter) RegisterEventHandler(event string, callback func([]interface{}) error) {
 	if self.eventHandlers == nil {
 		self.eventHandlers = map[string]func([]interface{}) error{}
 	}
 	self.eventHandlers[event] = callback
 }
-func (self *fakeMacroPrinter) SendEvent(event string, params []interface{})                       {}
-func (self *fakeMacroPrinter) CurrentExtruderName() string                                        { return "" }
-func (self *fakeMacroPrinter) AddObject(name string, obj interface{}) error                       { return nil }
-func (self *fakeMacroPrinter) LookupObjects(module string) []interface{}                          { return nil }
-func (self *fakeMacroPrinter) HasStartArg(name string) bool                                       { return false }
-func (self *fakeMacroPrinter) LookupHeater(name string) printerpkg.HeaterRuntime                  { return nil }
-func (self *fakeMacroPrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry           { return nil }
-func (self *fakeMacroPrinter) LookupMCU(name string) printerpkg.MCURuntime                        { return nil }
-func (self *fakeMacroPrinter) InvokeShutdown(msg string)                                          {}
-func (self *fakeMacroPrinter) IsShutdown() bool                                                   { return false }
-func (self *fakeMacroPrinter) Reactor() printerpkg.ModuleReactor                                  { return nil }
-func (self *fakeMacroPrinter) StepperEnable() printerpkg.StepperEnableRuntime                     { return nil }
-func (self *fakeMacroPrinter) GCode() printerpkg.GCodeRuntime                                     { return self.gcode }
-func (self *fakeMacroPrinter) GCodeMove() printerpkg.MoveTransformController                      { return nil }
-func (self *fakeMacroPrinter) Webhooks() printerpkg.WebhookRegistry                               { return nil }
+func (self *fakeMacroPrinter) SendEvent(event string, params []interface{})             {}
+func (self *fakeMacroPrinter) CurrentExtruderName() string                              { return "" }
+func (self *fakeMacroPrinter) AddObject(name string, obj interface{}) error             { return nil }
+func (self *fakeMacroPrinter) LookupObjects(module string) []interface{}                { return nil }
+func (self *fakeMacroPrinter) HasStartArg(name string) bool                             { return false }
+func (self *fakeMacroPrinter) LookupHeater(name string) printerpkg.HeaterRuntime        { return nil }
+func (self *fakeMacroPrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry { return nil }
+func (self *fakeMacroPrinter) LookupMCU(name string) printerpkg.MCURuntime              { return nil }
+func (self *fakeMacroPrinter) InvokeShutdown(msg string)                                {}
+func (self *fakeMacroPrinter) IsShutdown() bool                                         { return false }
+func (self *fakeMacroPrinter) Reactor() printerpkg.ModuleReactor                        { return nil }
+func (self *fakeMacroPrinter) StepperEnable() printerpkg.StepperEnableRuntime           { return nil }
+func (self *fakeMacroPrinter) GCode() printerpkg.GCodeRuntime                           { return self.gcode }
+func (self *fakeMacroPrinter) GCodeMove() printerpkg.MoveTransformController            { return nil }
+func (self *fakeMacroPrinter) Webhooks() printerpkg.WebhookRegistry                     { return self.webhooks }
+
+type fakeMacroWebhookRegistry struct {
+	methods []string
+	kwargs  []interface{}
+	err     error
+}
+
+func (self *fakeMacroWebhookRegistry) RegisterEndpoint(path string, handler func() (interface{}, error)) error {
+	return nil
+}
+
+func (self *fakeMacroWebhookRegistry) RegisterEndpointWithRequest(path string, handler func(printerpkg.WebhookRequest) (interface{}, error)) error {
+	return nil
+}
+
+func (self *fakeMacroWebhookRegistry) CallRemoteMethod(method string, kwargs interface{}) error {
+	self.methods = append(self.methods, method)
+	self.kwargs = append(self.kwargs, kwargs)
+	return self.err
+}
 
 type fakeMacroGCode struct {
 	commands    map[string]func(printerpkg.Command) error
@@ -89,11 +113,11 @@ func (self *fakeMacroGCode) RegisterMuxCommand(cmd string, key string, value str
 	self.muxCommands[cmd+":"+key+":"+value] = handler
 }
 func (self *fakeMacroGCode) IsTraditionalGCode(cmd string) bool { return self.traditional[cmd] }
-func (self *fakeMacroGCode) RunScriptFromCommand(script string)  {}
-func (self *fakeMacroGCode) RunScript(script string)             {}
-func (self *fakeMacroGCode) IsBusy() bool                        { return false }
-func (self *fakeMacroGCode) Mutex() printerpkg.Mutex             { return nil }
-func (self *fakeMacroGCode) RespondInfo(msg string, log bool)    {}
+func (self *fakeMacroGCode) RunScriptFromCommand(script string) {}
+func (self *fakeMacroGCode) RunScript(script string)            {}
+func (self *fakeMacroGCode) IsBusy() bool                       { return false }
+func (self *fakeMacroGCode) Mutex() printerpkg.Mutex            { return nil }
+func (self *fakeMacroGCode) RespondInfo(msg string, log bool)   {}
 func (self *fakeMacroGCode) ReplaceCommand(cmd string, handler func(printerpkg.Command) error, whenNotReady bool, desc string) func(printerpkg.Command) error {
 	old := self.commands[cmd]
 	self.commands[cmd] = handler
@@ -133,9 +157,9 @@ func (self *fakeMacroCommand) Float(name string, defaultValue float64) float64 {
 func (self *fakeMacroCommand) Int(name string, defaultValue int, minValue *int, maxValue *int) int {
 	return defaultValue
 }
-func (self *fakeMacroCommand) Parameters() map[string]string { return self.params }
+func (self *fakeMacroCommand) Parameters() map[string]string    { return self.params }
 func (self *fakeMacroCommand) RespondInfo(msg string, log bool) {}
-func (self *fakeMacroCommand) RespondRaw(msg string) {}
+func (self *fakeMacroCommand) RespondRaw(msg string)            {}
 func (self *fakeMacroCommand) Get(name string, _default interface{}, parser interface{}, minval *float64, maxval *float64, above *float64, below *float64) string {
 	if value, ok := self.params[name]; ok {
 		return value
@@ -143,7 +167,7 @@ func (self *fakeMacroCommand) Get(name string, _default interface{}, parser inte
 	if defaultValue, ok := _default.(string); ok {
 		return defaultValue
 	}
-		panic("missing parameter")
+	panic("missing parameter")
 }
 func (self *fakeMacroCommand) RawParameters() string { return self.rawparams }
 
@@ -199,5 +223,56 @@ func TestGCodeMacroRunPassesTemplateContextAndRawParams(t *testing.T) {
 	}
 	if call["speed"] != "100" {
 		t.Fatalf("unexpected macro variable %#v", call["speed"])
+	}
+}
+
+func TestCreateTemplateContextCallsRemoteMethod(t *testing.T) {
+	webhooks := &fakeMacroWebhookRegistry{}
+	printer := &fakeMacroPrinter{gcode: &fakeMacroGCode{}, webhooks: webhooks}
+	ctx := CreateTemplateContext(printer, nil)
+	action, ok := ctx["action_call_remote_method"].(func(interface{}, interface{}) interface{})
+	if !ok {
+		t.Fatalf("unexpected action_call_remote_method type %T", ctx["action_call_remote_method"])
+	}
+	kwargs := map[string]interface{}{"a": 1}
+	if result := action("test.method", kwargs); result != "" {
+		t.Fatalf("unexpected result %#v", result)
+	}
+	if !reflect.DeepEqual(webhooks.methods, []string{"test.method"}) {
+		t.Fatalf("unexpected methods %#v", webhooks.methods)
+	}
+	if !reflect.DeepEqual(webhooks.kwargs, []interface{}{kwargs}) {
+		t.Fatalf("unexpected kwargs %#v", webhooks.kwargs)
+	}
+}
+
+func TestLoadMacroTemplateUsesConfigValueAndDefault(t *testing.T) {
+	printer := &fakeMacroPrinter{gcode: &fakeMacroGCode{traditional: map[string]bool{}}}
+	configWithScript := &fakeMacroConfig{
+		name:    "gcode_macro test",
+		values:  map[string]interface{}{"gcode": "SET_PIN PIN=beeper VALUE=1"},
+		printer: printer,
+	}
+	template := LoadMacroTemplate(configWithScript, "gcode", value.StringNone)
+	rendered, err := template.Render(map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected render error: %v", err)
+	}
+	if rendered != "SET_PIN PIN=beeper VALUE=1" {
+		t.Fatalf("unexpected rendered script %q", rendered)
+	}
+
+	configWithDefault := &fakeMacroConfig{
+		name:    "gcode_macro test",
+		values:  map[string]interface{}{},
+		printer: printer,
+	}
+	template = LoadMacroTemplate(configWithDefault, "activate_gcode", "M117 ready")
+	rendered, err = template.Render(map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected default render error: %v", err)
+	}
+	if rendered != "M117 ready" {
+		t.Fatalf("unexpected default rendered script %q", rendered)
 	}
 }

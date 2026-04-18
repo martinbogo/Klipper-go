@@ -104,7 +104,9 @@ func (self *fakeResonanceGCode) IsTraditionalGCode(cmd string) bool { return fal
 func (self *fakeResonanceGCode) RunScriptFromCommand(script string) {
 	self.scriptCalls = append(self.scriptCalls, script)
 }
-func (self *fakeResonanceGCode) RunScript(script string) { self.scriptCalls = append(self.scriptCalls, script) }
+func (self *fakeResonanceGCode) RunScript(script string) {
+	self.scriptCalls = append(self.scriptCalls, script)
+}
 func (self *fakeResonanceGCode) IsBusy() bool            { return false }
 func (self *fakeResonanceGCode) Mutex() printerpkg.Mutex { return nil }
 func (self *fakeResonanceGCode) RespondInfo(msg string, log bool) {
@@ -133,9 +135,9 @@ func (self *fakeResonanceReactor) Pause(waketime float64) float64 {
 }
 
 type fakeResonanceToolhead struct {
-	position      []float64
-	status        map[string]interface{}
-	moves         []struct {
+	position []float64
+	status   map[string]interface{}
+	moves    []struct {
 		pos   []float64
 		speed float64
 	}
@@ -239,15 +241,17 @@ func (self *fakeResonancePrinter) HasStartArg(name string) bool                 
 func (self *fakeResonancePrinter) LookupHeater(name string) printerpkg.HeaterRuntime {
 	return nil
 }
-func (self *fakeResonancePrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry { return nil }
-func (self *fakeResonancePrinter) LookupMCU(name string) printerpkg.MCURuntime               { return nil }
-func (self *fakeResonancePrinter) InvokeShutdown(msg string)                                  {}
-func (self *fakeResonancePrinter) IsShutdown() bool                                           { return false }
-func (self *fakeResonancePrinter) Reactor() printerpkg.ModuleReactor                          { return self.reactor }
-func (self *fakeResonancePrinter) StepperEnable() printerpkg.StepperEnableRuntime             { return nil }
-func (self *fakeResonancePrinter) GCode() printerpkg.GCodeRuntime                             { return self.gcode }
-func (self *fakeResonancePrinter) GCodeMove() printerpkg.MoveTransformController               { return nil }
-func (self *fakeResonancePrinter) Webhooks() printerpkg.WebhookRegistry                       { return nil }
+func (self *fakeResonancePrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry {
+	return nil
+}
+func (self *fakeResonancePrinter) LookupMCU(name string) printerpkg.MCURuntime    { return nil }
+func (self *fakeResonancePrinter) InvokeShutdown(msg string)                      {}
+func (self *fakeResonancePrinter) IsShutdown() bool                               { return false }
+func (self *fakeResonancePrinter) Reactor() printerpkg.ModuleReactor              { return self.reactor }
+func (self *fakeResonancePrinter) StepperEnable() printerpkg.StepperEnableRuntime { return nil }
+func (self *fakeResonancePrinter) GCode() printerpkg.GCodeRuntime                 { return self.gcode }
+func (self *fakeResonancePrinter) GCodeMove() printerpkg.MoveTransformController  { return nil }
+func (self *fakeResonancePrinter) Webhooks() printerpkg.WebhookRegistry           { return nil }
 
 type fakeResonanceConfig struct {
 	printer  *fakeResonancePrinter
@@ -275,7 +279,7 @@ func (self *fakeResonanceConfig) Float(option string, defaultValue float64) floa
 	return defaultValue
 }
 
-func (self *fakeResonanceConfig) OptionalFloat(option string) *float64 { return nil }
+func (self *fakeResonanceConfig) OptionalFloat(option string) *float64  { return nil }
 func (self *fakeResonanceConfig) LoadObject(section string) interface{} { return nil }
 func (self *fakeResonanceConfig) LoadTemplate(module string, option string, defaultValue string) printerpkg.Template {
 	return nil
@@ -342,9 +346,9 @@ func (self *fakeAccelClient) Get_samples() [][]float64 {
 }
 
 type fakeAccelChip struct {
-	name     string
-	samples  [][]float64
-	started  []*fakeAccelClient
+	name    string
+	samples [][]float64
+	started []*fakeAccelClient
 }
 
 func (self *fakeAccelChip) Start_internal_client() accelClient {
@@ -389,6 +393,18 @@ func makeSineSamples() [][]float64 {
 	return samples
 }
 
+func TestToolheadMinimumCruiseRatioUsesCanonicalOrLegacyStatus(t *testing.T) {
+	if ratio := toolheadMinimumCruiseRatio(map[string]interface{}{"minimum_cruise_ratio": 0.25, "max_accel": 1000.0, "max_accel_to_decel": 900.0}); math.Abs(ratio-0.25) > 1e-9 {
+		t.Fatalf("expected canonical minimum_cruise_ratio to win, got %v", ratio)
+	}
+	if ratio := toolheadMinimumCruiseRatio(map[string]interface{}{"max_accel": 1000.0, "max_accel_to_decel": 900.0}); math.Abs(ratio-0.1) > 1e-9 {
+		t.Fatalf("expected legacy accel-to-decel fallback ratio 0.1, got %v", ratio)
+	}
+	if ratio := toolheadMinimumCruiseRatio(map[string]interface{}{"max_accel": 0.0, "max_accel_to_decel": 900.0}); math.Abs(ratio-0.0) > 1e-9 {
+		t.Fatalf("expected zero ratio fallback for invalid max_accel, got %v", ratio)
+	}
+}
+
 func TestLoadConfigResonanceTesterRegistersCommandsAndConnectsChips(t *testing.T) {
 	toolhead := &fakeResonanceToolhead{
 		position: []float64{0, 0, 0, 0},
@@ -426,10 +442,32 @@ func TestLoadConfigResonanceTesterRegistersCommandsAndConnectsChips(t *testing.T
 	}
 }
 
+func TestLoadConfigResonanceTesterAllowsMissingMaxSmoothing(t *testing.T) {
+	toolhead := &fakeResonanceToolhead{
+		position: []float64{0, 0, 0, 0},
+		status:   map[string]interface{}{"max_accel": 1000.0, "max_accel_to_decel": 1000.0},
+	}
+	printer := &fakeResonancePrinter{
+		lookup: map[string]interface{}{
+			"toolhead": toolhead,
+			"chip0":    &fakeAccelChip{name: "chip0"},
+		},
+		gcode:   &fakeResonanceGCode{},
+		reactor: &fakeResonanceReactor{},
+	}
+	config := makeResonanceConfig(printer)
+	delete(config.values, "max_smoothing")
+
+	module := LoadConfigResonanceTester(config).(*ResonanceTester)
+	if module.max_smoothing != 0 {
+		t.Fatalf("expected missing max_smoothing to default to 0, got %v", module.max_smoothing)
+	}
+}
+
 func TestResonanceTesterCmdTestResonancesWritesRawDataAndRestoresInputShaper(t *testing.T) {
 	toolhead := &fakeResonanceToolhead{
 		position: []float64{0, 0, 0, 0},
-		status:   map[string]interface{}{"max_accel": 1000.0, "max_accel_to_decel": 900.0},
+		status:   map[string]interface{}{"max_accel": 1000.0, "minimum_cruise_ratio": 0.1, "max_accel_to_decel": 900.0},
 	}
 	chip := &fakeAccelChip{name: "chip0", samples: makeSineSamples()}
 	inputShaper := &InputShaper{
@@ -469,6 +507,12 @@ func TestResonanceTesterCmdTestResonancesWritesRawDataAndRestoresInputShaper(t *
 	}
 	if len(printer.gcode.scriptCalls) != 2 {
 		t.Fatalf("expected two SET_VELOCITY_LIMIT scripts, got %#v", printer.gcode.scriptCalls)
+	}
+	if printer.gcode.scriptCalls[0] != "SET_VELOCITY_LIMIT ACCEL=50.000 MINIMUM_CRUISE_RATIO=0.000" {
+		t.Fatalf("unexpected override script %q", printer.gcode.scriptCalls[0])
+	}
+	if printer.gcode.scriptCalls[1] != "SET_VELOCITY_LIMIT ACCEL=1000.000 MINIMUM_CRUISE_RATIO=0.100" {
+		t.Fatalf("unexpected restore script %q", printer.gcode.scriptCalls[1])
 	}
 	if len(toolhead.moves) != 2 {
 		t.Fatalf("expected one resonance pulse iteration with two moves, got %d", len(toolhead.moves))
@@ -519,6 +563,36 @@ func TestResonanceTesterCmdShaperCalibrateSavesRecommendedSettings(t *testing.T)
 	}
 	if _, err := os.Stat(outputFile); err != nil {
 		t.Fatalf("expected calibration data file %q to exist: %v", outputFile, err)
+	}
+}
+
+func TestResonanceTesterUsesLegacyStatusAliasAsFallback(t *testing.T) {
+	toolhead := &fakeResonanceToolhead{
+		position: []float64{0, 0, 0, 0},
+		status:   map[string]interface{}{"max_accel": 1000.0, "max_accel_to_decel": 900.0},
+	}
+	chip := &fakeAccelChip{name: "chip0", samples: makeSineSamples()}
+	printer := &fakeResonancePrinter{
+		lookup: map[string]interface{}{
+			"toolhead": toolhead,
+			"chip0":    chip,
+		},
+		gcode:   &fakeResonanceGCode{},
+		reactor: &fakeResonanceReactor{},
+	}
+	module := NewResonanceTester(makeResonanceConfig(printer))
+	if err := module.connect(nil); err != nil {
+		t.Fatalf("connect returned error: %v", err)
+	}
+	cmd := &fakeResonanceCommand{strings: map[string]string{"AXIS": "x", "OUTPUT": "raw_data", "NAME": "legacyfallback"}}
+	if err := module.Cmd_TEST_RESONANCES(cmd); err != nil {
+		t.Fatalf("Cmd_TEST_RESONANCES returned error: %v", err)
+	}
+	if len(printer.gcode.scriptCalls) != 2 {
+		t.Fatalf("expected two SET_VELOCITY_LIMIT scripts, got %#v", printer.gcode.scriptCalls)
+	}
+	if printer.gcode.scriptCalls[1] != "SET_VELOCITY_LIMIT ACCEL=1000.000 MINIMUM_CRUISE_RATIO=0.100" {
+		t.Fatalf("expected legacy fallback restore script, got %q", printer.gcode.scriptCalls[1])
 	}
 }
 

@@ -12,8 +12,6 @@ import (
 	"goklipper/internal/pkg/queue"
 	"goklipper/internal/pkg/util"
 	"math"
-	"reflect"
-	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -77,14 +75,17 @@ type ReactorCompletion struct {
 	result     interface{}
 	waiting    *list.List
 	createTime int64
+	done       chan struct{}
 }
 
 func NewReactorCompletion(reactor IReactor) *ReactorCompletion {
 	self := ReactorCompletion{}
+	self.sentinel = &struct{}{}
 	self.reactor = reactor
 	self.result = self.sentinel
 	self.waiting = list.New()
 	self.createTime = time.Now().Unix()
+	self.done = make(chan struct{})
 	return &self
 }
 func (self *ReactorCompletion) Test() bool {
@@ -95,6 +96,12 @@ func (self *ReactorCompletion) Test() bool {
 func (self *ReactorCompletion) Complete(result interface{}) {
 	self.result = result
 
+	select {
+	case <-self.done:
+	default:
+		close(self.done)
+	}
+
 	for i := self.waiting.Front(); i != nil; i = i.Next() {
 		wait := i.Value.(*greenlet.ReactorGreenlet)
 		if wait == nil || wait.Timer == nil {
@@ -104,12 +111,37 @@ func (self *ReactorCompletion) Complete(result interface{}) {
 	}
 }
 func (self *ReactorCompletion) Wait(waketime float64, waketime_result interface{}) interface{} {
-	if self.result == nil {
+	if self.result == self.sentinel {
 		wait := greenlet.Getcurrent()
-		elm := self.waiting.PushBack(wait)
-		self.reactor.Pause(waketime)
-		self.waiting.Remove(elm)
-		if self.result == nil {
+		isGreenlet := false
+		if wait != nil {
+			switch sr := self.reactor.(type) {
+			case *SelectReactor:
+				isGreenlet = sr._g_dispatch != nil
+			case *PollReactor:
+				isGreenlet = sr._g_dispatch != nil
+			case *EPollReactor:
+				isGreenlet = sr._g_dispatch != nil
+			}
+		}
+
+		if isGreenlet {
+			elm := self.waiting.PushBack(wait)
+			self.reactor.Pause(waketime)
+			self.waiting.Remove(elm)
+		} else {
+			delay := waketime - self.reactor.Monotonic()
+			if delay <= 0 {
+				delay = 0.0001
+			}
+			waitDuration := time.Duration(delay * float64(time.Second))
+			select {
+			case <-self.done:
+			case <-time.After(waitDuration):
+			}
+		}
+
+		if self.result == self.sentinel {
 			return waketime_result
 		}
 	}
@@ -156,6 +188,7 @@ type ReactorMutex struct {
 	queue        []*greenlet.ReactorGreenlet
 	Lock         func()
 	Unlock       func()
+	mu           sync.Mutex
 }
 
 func NewReactorMutex(reactor IReactor, is_locked bool) *ReactorMutex {
@@ -172,22 +205,30 @@ func (self *ReactorMutex) Test() bool {
 	return self.is_locked
 }
 func (self *ReactorMutex) __enter__() {
+	self.mu.Lock()
 	if !self.is_locked {
 		self.is_locked = true
+		self.mu.Unlock()
 		return
 	}
 	g := greenlet.Getcurrent()
 	self.queue = append(self.queue, g)
+	self.mu.Unlock()
 	for {
 		self.reactor.Pause(constants.NEVER)
+		self.mu.Lock()
 		if self.next_pending && self.queue[0] == g {
 			self.next_pending = false
-			self.queue = self.queue[1:len(self.queue)]
+			self.queue = self.queue[1:]
+			self.mu.Unlock()
 			return
 		}
+		self.mu.Unlock()
 	}
 }
 func (self *ReactorMutex) __exit__() {
+	self.mu.Lock()
+	defer self.mu.Unlock()
 	if len(self.queue) == 0 {
 		self.is_locked = false
 		return
@@ -312,7 +353,6 @@ func (self *SelectReactor) _check_timers(eventtime float64, busy bool) float64 {
 		waketime := t.waketime
 		if eventtime >= waketime {
 			t.waketime = constants.NEVER
-			logger.Debug("start timer", runtime.FuncForPC(reflect.ValueOf(t.callback).Pointer()).Name())
 			waketime := t.callback(eventtime)
 			t.waketime = waketime
 			if g_dispatch != self._g_dispatch {
@@ -341,7 +381,7 @@ func (self *SelectReactor) _sys_pause(waketime float64) float64 {
 	// Pause using system sleep for when reactor not running
 	delay := waketime - self.Monotonic()
 	if delay > 0. {
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Duration(delay * float64(time.Second)))
 	}
 	return self.Monotonic()
 }
@@ -370,7 +410,12 @@ func (self *SelectReactor) Pause(waketime float64) float64 {
 	return eventtime
 }
 func (self *SelectReactor) End() {
+	logger.Infof("reactor: End called process=%t pipe_ready=%t", self._process, self._pipe_fds[1] != nil)
 	self._process = false
+	self._next_timer = constants.NOW
+	if self._pipe_fds[1] != nil {
+		_, _ = syscall.Write(self._pipe_fds[1].(int), []byte{'.'})
+	}
 }
 
 func (self *SelectReactor) Monotonic() float64 {
@@ -495,7 +540,7 @@ func (self *SelectReactor) Set_fd_wake(file_handler *ReactorFileHandler, is_read
 			self._write_fds.Remove(old)
 		}
 	} else {
-		if !is_writeable {
+		if is_writeable {
 			self._write_fds.PushBack(file_handler)
 		}
 	}
@@ -571,6 +616,10 @@ func (self *SelectReactor) _end_greenlet(g_old *greenlet.ReactorGreenlet) {
 	self._greenlets.PushBack(g_old)
 	self.Unregister_timer(g_old.Timer.(*ReactorTimer))
 	g_old.Timer = nil
+	if !self._process || self._g_dispatch == nil {
+		self._g_dispatch = g_old
+		return
+	}
 	// Switch to _check_timers (via g_old.timer.callback return)
 	self._g_dispatch.SwitchTo(constants.NEVER)
 	// This greenlet reactivated from pause() - return to main dispatch loop
@@ -687,7 +736,12 @@ func (self *PollReactor) Run() error {
 	self._process = true
 	g_next := greenlet.NewReactorGreenlet(self._dispatch_loop)
 	self._all_greenlets = append(self._all_greenlets, g_next)
-	g_next.Switch()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		g_next.Switch()
+	}()
+	<-done
 	return nil
 }
 func (self *PollReactor) Register_callback(callback func(interface{}) interface{}, waketime float64) *ReactorCompletion {
@@ -795,6 +849,7 @@ func (self *EPollReactor) _dispatch_loop(req interface{}) interface{} {
 	for {
 		//defer sys.CatchPanic()
 		if !self._process {
+			logger.Infof("reactor: dispatch loop exiting")
 			break
 		}
 		timeout := self._check_timers(eventtime, busy)
@@ -845,11 +900,18 @@ func (self *EPollReactor) Run() error {
 	self._process = true
 	g_next := greenlet.NewReactorGreenlet(self._dispatch_loop)
 	self._all_greenlets = append(self._all_greenlets, g_next)
-	g_next.Switch()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		g_next.Switch()
+	}()
+	<-done
+	logger.Infof("reactor: Run returned from dispatch greenlet")
 	self._all_greenlets = make([]*greenlet.ReactorGreenlet, 0)
 	self._greenlets = list.New()
 	syscall.Close(self._pipe_fds[0].(int))
 	syscall.Close(self._pipe_fds[1].(int))
+	logger.Infof("reactor: Run cleanup complete")
 	return nil
 }
 
@@ -1020,6 +1082,10 @@ func (self *EPollReactor) _end_greenlet(g_old *greenlet.ReactorGreenlet) {
 	self._greenlets.PushBack(g_old)
 	self.Unregister_timer(g_old.Timer.(*ReactorTimer))
 	g_old.Timer = nil
+	if !self._process || self._g_dispatch == nil {
+		self._g_dispatch = g_old
+		return
+	}
 	// Switch to _check_timers (via g_old.timer.callback return)
 	self._g_dispatch.SwitchTo(constants.NEVER)
 	// This greenlet reactivated from pause() - return to main dispatch loop

@@ -68,3 +68,57 @@ func TestMoveSplitterSplitFollowsMeshGradient(t *testing.T) {
 		t.Fatalf("split moves = %v, want %v", got, want)
 	}
 }
+
+func TestResolveFadeTargetUsesMeshAverageWhenUnset(t *testing.T) {
+	mesh := NewZMesh(testMeshParams())
+	mesh.Build_mesh([][]float64{{0, 10}, {20, 30}})
+
+	fadeTarget, logFadeComplete, err := ResolveFadeTarget(mesh, true, 50.0, 0.0)
+	if err != nil {
+		t.Fatalf("ResolveFadeTarget() error = %v", err)
+	}
+	if !logFadeComplete {
+		t.Fatal("ResolveFadeTarget() did not request fade-complete logging")
+	}
+	if got, want := fadeTarget, 15.0; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("fadeTarget = %v, want %v", got, want)
+	}
+}
+
+func TestResolveFadeTargetRejectsOutOfRangeConfiguredTarget(t *testing.T) {
+	mesh := NewZMesh(testMeshParams())
+	mesh.Build_mesh([][]float64{{0, 10}, {20, 30}})
+
+	if _, _, err := ResolveFadeTarget(mesh, true, 50.0, 100.0); err == nil {
+		t.Fatal("expected out-of-range fade target error")
+	}
+}
+
+func TestCalculateUntransformedPosition(t *testing.T) {
+	mesh := NewZMesh(testMeshParams())
+	mesh.Build_mesh([][]float64{{0, 10}, {20, 30}})
+
+	t.Run("without mesh subtracts fade target", func(t *testing.T) {
+		got := CalculateUntransformedPosition([]float64{1, 2, 3, 4}, nil, 10, 20, 10, 1.5)
+		want := []float64{1, 2, 1.5, 4}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("CalculateUntransformedPosition() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("with mesh removes active z adjustment", func(t *testing.T) {
+		got := CalculateUntransformedPosition([]float64{5, 5, 20, 1}, mesh, 10, 40, 30, 0)
+		want := []float64{5, 5, 5, 1}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("CalculateUntransformedPosition() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("with mesh after fade completion keeps z unchanged", func(t *testing.T) {
+		got := CalculateUntransformedPosition([]float64{5, 5, 50, 1}, mesh, 10, 40, 30, 0)
+		want := []float64{5, 5, 50, 1}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("CalculateUntransformedPosition() = %v, want %v", got, want)
+		}
+	})
+}

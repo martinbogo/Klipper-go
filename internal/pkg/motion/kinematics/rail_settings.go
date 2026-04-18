@@ -7,6 +7,7 @@ import (
 
 type legacyRailConfig interface {
 	Get_name() string
+	HasOption(option string) bool
 	Getfloat(option string, default1 interface{}, minval, maxval, above, below float64, note_valid bool) float64
 	Getboolean(option string, default1 interface{}, note_valid bool) bool
 }
@@ -48,7 +49,11 @@ func BuildLegacyRailSettings(config legacyRailConfig, endstop interface{}, needP
 	secondHomingSpeed := config.Getfloat("second_homing_speed", homingSpeed/2., 0, 0, 0., 0, false)
 	homingRetractSpeed := config.Getfloat("homing_retract_speed", homingSpeed, 0, 0, 0., 0, false)
 	homingRetractDist := config.Getfloat("homing_retract_dist", 5., 0, 0, 0., 0, false)
-	requestedHomingPositiveDir := config.Getboolean("homing_positive_dir", false, false)
+	hasRequestedHomingPositiveDir := config.HasOption("homing_positive_dir")
+	requestedHomingPositiveDir := false
+	if hasRequestedHomingPositiveDir {
+		requestedHomingPositiveDir = config.Getboolean("homing_positive_dir", false, false)
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			switch recovered.(string) {
@@ -63,8 +68,8 @@ func BuildLegacyRailSettings(config legacyRailConfig, endstop interface{}, needP
 			}
 		}
 	}()
-	plan := BuildRailConfigPlan(positionEndstop, needPositionMinMax, positionMin, positionMax, requestedHomingPositiveDir)
-	if requestedHomingPositiveDir == false {
+	plan := BuildRailConfigPlan(positionEndstop, needPositionMinMax, positionMin, positionMax, hasRequestedHomingPositiveDir, requestedHomingPositiveDir)
+	if !hasRequestedHomingPositiveDir {
 		config.Getboolean("homing_positive_dir", plan.HomingPositiveDir, false)
 	}
 	return RailSettings{

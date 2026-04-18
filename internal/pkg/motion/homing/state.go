@@ -70,7 +70,7 @@ func (self *State) SetHomedPosition(pos []float64) {
 	self.toolhead.SetPosition(append([]float64{}, pos...), []int{})
 }
 
-func (self *State) HomeRailsWithPositions(rails []Rail, forcepos []interface{}, movepos []interface{}, newMove func([]NamedEndstop) MoveExecutor, afterHome func()) error {
+func (self *State) HomeRailsWithPositions(rails []Rail, forcepos []interface{}, movepos []interface{}, newMove func([]NamedEndstop) MoveExecutor, afterHome func() error) error {
 	if len(rails) == 0 {
 		return nil
 	}
@@ -144,10 +144,11 @@ func (self *State) HomeRailsWithPositions(rails []Rail, forcepos []interface{}, 
 	for _, position := range hmove.StepperPositions() {
 		self.triggerMCUPos[position.StepperName] = float64(position.TrigPos)
 	}
-	self.toolhead.SetPosition(homepos, []int{})
 	self.adjustPos = map[string]float64{}
 	if afterHome != nil {
-		afterHome()
+		if err := afterHome(); err != nil {
+			return err
+		}
 	}
 	hasAdjustments := false
 	for _, adjustment := range self.adjustPos {

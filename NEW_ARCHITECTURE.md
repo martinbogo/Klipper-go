@@ -194,7 +194,7 @@ The remaining effort is not evenly distributed. By file count the migration is a
 | Motion backbone | remaining `project/toolhead_*.go` queue/trapq/bootstrap shell, plus `project/mcu_stepper.go` / `project/printer_rail.go` and `project/mcu_*.go` lifecycle, `project/mcu_endstop.go` config/registration shell, and `project/mcu_trsync.go` config/stop ownership | 7–11 days |
 | Homing, probe, bed mesh, motion reporting | remaining shells in `extras_homing.go`, `extras_probe.go`, `extras_manual_probe.go`, `extras_bed_mesh.go`, `extras_motion_report.go` | 6–10 days |
 | Bus, TMC, and sensor drivers | `extras_bus.go`, `extras_tmc*.go`, `extras_accelerometer.go`, `extras_lis2dw12.go` | 10–15 days |
-| Core runtime/bootstrap and board-specific integration | `k3c.go`, `Reactor.go`, `configfile.go`, `Webhooks.go`, ACE/K3C integration files | 8–12 days |
+| Core runtime/bootstrap and board-specific integration | `goklipper.go`, `Reactor.go`, `configfile.go`, `Webhooks.go`, ACE/K3C integration files | 8–12 days |
 
 ### Practical completion estimate
 
@@ -277,7 +277,7 @@ If the goal is to keep momentum high and continue taking clean slices, the next 
 2. continue carving `project/mcu_stepper.go`, `project/printer_rail.go`, and the remaining `project/mcu_*.go` shell so only lifecycle, `MCU_endstop` config/registration shells, trsync config/stop shells, and serial ownership stay in `project/`
 3. move the remaining probe/bed-mesh/report/manual-probe shells onto the now-stronger motion boundary
 4. then migrate TMC/bus/sensor drivers
-5. only after that, decide how much of `k3c.go`, `Reactor.go`, `configfile.go`, and ACE-specific code should truly leave `project/`
+5. only after that, decide how much of `goklipper.go`, `Reactor.go`, `configfile.go`, and ACE-specific code should truly leave `project/`
 
 This keeps the repository moving while deferring the highest-risk lifecycle refactors until the internal package boundaries are already strong.
 
@@ -422,7 +422,7 @@ These files are downstream of the MCU shell and should be moved after the MCU tr
 This is the last band on purpose. Even after most logic has moved inward, some of these files may intentionally remain as the final composition shell unless the repository chooses to rename that shell rather than merely empty it.
 
 - Files:
-   - `k3c.go`
+   - `goklipper.go`
    - `Reactor.go`
    - `Webhooks.go`
    - `configfile.go`

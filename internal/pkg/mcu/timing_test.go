@@ -164,6 +164,24 @@ func TestMoveQueueTimingStateCheckActiveSkipsTimeoutWhenClockActive(t *testing.T
 	}
 }
 
+func TestBuildMoveQueueTimeoutPlan(t *testing.T) {
+	plan := BuildMoveQueueTimeoutPlan(true, "mcu", 12.5)
+	if !plan.TimedOut {
+		t.Fatal("expected timeout plan to mark timeout")
+	}
+	if plan.ShutdownMessage != "Lost communication with MCU mcu" {
+		t.Fatalf("unexpected shutdown message %q", plan.ShutdownMessage)
+	}
+	if plan.LogMessage != "Timeout with MCU 'mcu' (eventtime=12.500000), ERROR:Lost communication with MCU mcu" {
+		t.Fatalf("unexpected log message %q", plan.LogMessage)
+	}
+
+	skipped := BuildMoveQueueTimeoutPlan(false, "mcu", 12.5)
+	if skipped.TimedOut || skipped.ShutdownMessage != "" || skipped.LogMessage != "" {
+		t.Fatalf("expected empty skipped plan, got %#v", skipped)
+	}
+}
+
 func TestStepGenerationStateGenerateStepsRunsCallbacksAndClearsThem(t *testing.T) {
 	ops := &fakeStepGenerationOps{activeTime: 8.5}
 	callbackTimes := []float64{}

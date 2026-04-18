@@ -2,6 +2,7 @@ package motion
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"goklipper/common/constants"
@@ -238,4 +239,129 @@ func TestRunToolheadDripMoveRepanicsUnexpectedFlushError(t *testing.T) {
 	}()
 
 	RunToolheadDripMove(runtime, []float64{9.0}, 12.0, nil, ToolheadDripMoveConfig{LookaheadFlushTime: 2.0})
+}
+
+type fakeProcessMoveRuntime struct {
+	core              *ToolheadCoreState
+	queuedKinematicAt []float64
+	queuedExtruderAt  []float64
+	noteCalls         [][2]float64
+	advanceCalls      []float64
+	canPause          bool
+}
+
+func (self *fakeProcessMoveRuntime) QueueKinematicMove(printTime float64, move *Move) {
+	_ = move
+	self.queuedKinematicAt = append(self.queuedKinematicAt, printTime)
+}
+
+func (self *fakeProcessMoveRuntime) QueueExtruderMove(printTime float64, move *Move) {
+	_ = move
+	self.queuedExtruderAt = append(self.queuedExtruderAt, printTime)
+}
+
+func (self *fakeProcessMoveRuntime) PrintTime() float64 {
+	return self.core.PrintTime
+}
+
+func (self *fakeProcessMoveRuntime) KinFlushDelay() float64 {
+	return self.core.KinFlushDelay
+}
+
+func (self *fakeProcessMoveRuntime) CanPause() bool {
+	return self.canPause
+}
+
+func (self *fakeProcessMoveRuntime) NoteMovequeueActivity(mqTime float64, setStepGenTime bool) {
+	flag := 0.0
+	if setStepGenTime {
+		flag = 1.0
+	}
+	self.noteCalls = append(self.noteCalls, [2]float64{mqTime, flag})
+	self.core.NoteMovequeueActivity(mqTime, setStepGenTime)
+}
+
+func (self *fakeProcessMoveRuntime) AdvanceMoveTime(nextPrintTime float64) {
+	self.advanceCalls = append(self.advanceCalls, nextPrintTime)
+	self.core.PrintTime = nextPrintTime
+}
+
+func (self *fakeProcessMoveRuntime) Monotonic() float64 {
+	return 0.0
+}
+
+func (self *fakeProcessMoveRuntime) EstimatedPrintTime(eventtime float64) float64 {
+	_ = eventtime
+	return 0.0
+}
+
+func TestProcessToolheadMoveBatchClearsPrimingStateAndAdvancesTiming(t *testing.T) {
+	core := &ToolheadCoreState{
+		PrintTime:           5.0,
+		SpecialQueuingState: "NeedPrime",
+		NeedCheckPause:      2.5,
+		KinFlushDelay:       0.1,
+		DoKickFlushTimer:    true,
+	}
+	runtime := &fakeProcessMoveRuntime{core: core, canPause: true}
+	calcCount := 0
+	moves := []*Move{{
+		Is_kinematic_move: true,
+		Axes_d:            []float64{1.0, 0.0, 0.0, 1.0},
+		Accel_t:           0.2,
+		Cruise_t:          0.3,
+		Decel_t:           0.1,
+	}}
+
+	err := ProcessToolheadMoveBatch(core, moves, runtime, func() {
+		calcCount++
+		core.PrintTime = 6.0
+	}, runtime, runtime, &fakeDripCompletion{}, testToolheadDripConfig())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calcCount != 1 {
+		t.Fatalf("expected one calc-print-time call, got %d", calcCount)
+	}
+	if core.SpecialQueuingState != "" || !almostEqualFloat64(core.NeedCheckPause, -1.0) {
+		t.Fatalf("expected priming state reset, got state=%q need=%v", core.SpecialQueuingState, core.NeedCheckPause)
+	}
+	if !reflect.DeepEqual(runtime.queuedKinematicAt, []float64{6.0}) || !reflect.DeepEqual(runtime.queuedExtruderAt, []float64{6.0}) {
+		t.Fatalf("unexpected queued move times kin=%#v ext=%#v", runtime.queuedKinematicAt, runtime.queuedExtruderAt)
+	}
+	assertFloat64Pairs(t, runtime.noteCalls, [][2]float64{{6.7, 1.0}})
+	if !reflect.DeepEqual(runtime.advanceCalls, []float64{6.6}) {
+		t.Fatalf("unexpected advance calls %#v", runtime.advanceCalls)
+	}
+	if !almostEqualFloat64(core.PrintTime, 6.6) {
+		t.Fatalf("unexpected core print time %v", core.PrintTime)
+	}
+}
+
+func TestProcessToolheadMoveBatchPropagatesDripCompletionEnd(t *testing.T) {
+	core := &ToolheadCoreState{
+		PrintTime:           5.0,
+		SpecialQueuingState: "Drip",
+		KinFlushDelay:       0.1,
+	}
+	runtime := &fakeProcessMoveRuntime{core: core, canPause: true}
+	moves := []*Move{{
+		Is_kinematic_move: true,
+		Axes_d:            []float64{1.0, 0.0, 0.0, 0.0},
+		Accel_t:           0.2,
+	}}
+
+	err := ProcessToolheadMoveBatch(core, moves, runtime, func() {}, runtime, runtime, &fakeDripCompletion{testResults: []bool{true}}, testToolheadDripConfig())
+	if !errors.Is(err, ErrDripModeEnd) {
+		t.Fatalf("expected ErrDripModeEnd, got %v", err)
+	}
+	if len(runtime.noteCalls) != 0 {
+		t.Fatalf("expected no post-error note calls, got %#v", runtime.noteCalls)
+	}
+	if len(runtime.advanceCalls) != 0 {
+		t.Fatalf("expected no post-error advance calls, got %#v", runtime.advanceCalls)
+	}
+	if !reflect.DeepEqual(runtime.queuedKinematicAt, []float64{5.0}) {
+		t.Fatalf("unexpected queued move times %#v", runtime.queuedKinematicAt)
+	}
 }

@@ -22,7 +22,7 @@ type buttonPinLookup interface {
 }
 
 type buttonCommand interface {
-	Send(args []int64, minclock int64, reqclock int64)
+	Send(data interface{}, minclock int64, reqclock int64)
 }
 
 type buttonMCU interface {
@@ -98,7 +98,7 @@ func (self *mcuButtons) buildConfig() {
 	restTicks := self.mcu.SecondsToClock(buttonsQueryTime)
 	self.mcu.AddConfigCmd(fmt.Sprintf("buttons_query oid=%d clock=%d rest_ticks=%d retransmit_count=%d invert=%d", self.oid, clock, restTicks, buttonsRetransmitCount, self.core.InvertMask()), true, false)
 	self.mcu.RegisterResponse(self.handleButtonsState, "buttons_state", self.oid)
-	}
+}
 
 func (self *mcuButtons) lookupCommand(msgformat string, commandQueue interface{}) buttonCommand {
 	command, err := self.mcu.LookupCommand(msgformat, commandQueue)
@@ -110,7 +110,7 @@ func (self *mcuButtons) lookupCommand(msgformat string, commandQueue interface{}
 		panic(fmt.Sprintf("command does not implement buttonCommand: %T", command))
 	}
 	return typed
-	}
+}
 
 func (self *mcuButtons) handleButtonsState(params map[string]interface{}) error {
 	self.core.HandleButtonsState(params["ack_count"].(int64), params["state"].([]int),
@@ -122,13 +122,13 @@ func (self *mcuButtons) handleButtonsState(params map[string]interface{}) error 
 		},
 	)
 	return nil
-	}
+}
 
 type mcuADCButtons struct {
-	reactor buttonReactor
-	pin     string
-	mcuADC  printerpkg.ADCPin
-	core    *ADCButtonState
+	reactor        buttonReactor
+	pin            string
+	mcuADC         printerpkg.ADCPin
+	core           *ADCButtonState
 	queryADCPrefix printerpkg.ADCQueryRegistry
 }
 
@@ -146,26 +146,26 @@ func newMCUADCButtons(printer printerpkg.ModulePrinter, queryADC printerpkg.ADCQ
 	adcPin := pins.SetupADC(pin)
 	adcPin.SetupMinMax(adcButtonsSampleTime, adcButtonsSampleCount, 0, 1, 0)
 	self := &mcuADCButtons{
-		reactor: reactor,
-		pin:     pin,
-		mcuADC:  adcPin,
-		core:    NewADCButtonState(pullup, adcButtonsDebounceTime),
+		reactor:        reactor,
+		pin:            pin,
+		mcuADC:         adcPin,
+		core:           NewADCButtonState(pullup, adcButtonsDebounceTime),
 		queryADCPrefix: queryADC,
 	}
 	adcPin.SetupCallback(adcButtonsReportTime, self.adcCallback)
 	queryADC.RegisterADC("adc_button:"+strings.TrimSpace(pin), adcPin)
 	return self
-	}
+}
 
 func (self *mcuADCButtons) SetupButton(minValue float64, maxValue float64, callback func(float64, bool)) {
 	self.core.AddButton(minValue, maxValue, callback)
-	}
+}
 
 func (self *mcuADCButtons) adcCallback(readTime float64, readValue float64) {
 	self.core.ADCCallback(readTime, readValue, func(callback func(float64)) {
 		self.reactor.RegisterAsyncCallback(callback)
 	})
-	}
+}
 
 type PrinterButtonsModule struct {
 	printer    printerpkg.ModulePrinter
@@ -176,7 +176,7 @@ type PrinterButtonsModule struct {
 
 func LoadConfigButtons(config printerpkg.ModuleConfig) interface{} {
 	return NewPrinterButtonsModule(config)
-	}
+}
 
 func NewPrinterButtonsModule(config printerpkg.ModuleConfig) *PrinterButtonsModule {
 	queryADCObj := config.LoadObject("query_adc")
@@ -190,7 +190,7 @@ func NewPrinterButtonsModule(config printerpkg.ModuleConfig) *PrinterButtonsModu
 		mcuButtons: map[string]*mcuButtons{},
 		adcButtons: map[string]*mcuADCButtons{},
 	}
-	}
+}
 
 func (self *PrinterButtonsModule) RegisterADCButton(pin string, minVal float64, maxVal float64, pullup float64, callback func(eventTime float64, state bool)) {
 	adcButtons := self.adcButtons[pin]
@@ -199,11 +199,11 @@ func (self *PrinterButtonsModule) RegisterADCButton(pin string, minVal float64, 
 		self.adcButtons[pin] = adcButtons
 	}
 	adcButtons.SetupButton(minVal, maxVal, callback)
-	}
+}
 
 func (self *PrinterButtonsModule) Register_adc_button(pin string, minVal float64, maxVal float64, pullup float64, callback func(eventTime float64, state bool)) {
 	self.RegisterADCButton(pin, minVal, maxVal, pullup, callback)
-	}
+}
 
 func (self *PrinterButtonsModule) RegisterADCButtonPush(pin string, minVal float64, maxVal float64, pullup float64, callback func(eventTime float64)) {
 	helper := func(eventTime float64, state bool) {
@@ -212,11 +212,11 @@ func (self *PrinterButtonsModule) RegisterADCButtonPush(pin string, minVal float
 		}
 	}
 	self.RegisterADCButton(pin, minVal, maxVal, pullup, helper)
-	}
+}
 
 func (self *PrinterButtonsModule) Register_adc_button_push(pin string, minVal float64, maxVal float64, pullup float64, callback func(eventTime float64)) {
 	self.RegisterADCButtonPush(pin, minVal, maxVal, pullup, callback)
-	}
+}
 
 func (self *PrinterButtonsModule) RegisterButtons(pins []string, callback func(float64, int)) {
 	if len(pins) == 0 {
@@ -251,11 +251,11 @@ func (self *PrinterButtonsModule) RegisterButtons(pins []string, callback func(f
 		self.mcuButtons[mcuName] = mcuButtons
 	}
 	mcuButtons.SetupButtons(pinParamsList, callback)
-	}
+}
 
 func (self *PrinterButtonsModule) Register_buttons(pins []string, callback func(float64, int)) {
 	self.RegisterButtons(pins, callback)
-	}
+}
 
 func (self *PrinterButtonsModule) RegisterRotaryEncoder(pin1 string, pin2 string, cwCallback func(), ccwCallback func(), stepsPerDetent int) {
 	var encoder *RotaryEncoder
@@ -275,11 +275,11 @@ func (self *PrinterButtonsModule) RegisterRotaryEncoder(pin1 string, pin2 string
 		panic(fmt.Sprintf("%d steps per detent not supported", stepsPerDetent))
 	}
 	self.RegisterButtons([]string{pin1, pin2}, encoder.Encoder_callback)
-	}
+}
 
 func (self *PrinterButtonsModule) Register_rotary_encoder(pin1 string, pin2 string, cwCallback func(), ccwCallback func(), stepsPerDetent int) {
 	self.RegisterRotaryEncoder(pin1, pin2, cwCallback, ccwCallback, stepsPerDetent)
-	}
+}
 
 func (self *PrinterButtonsModule) RegisterButtonPush(pin string, callback func(float64)) {
 	helper := func(eventtime float64, state int) {
@@ -288,11 +288,11 @@ func (self *PrinterButtonsModule) RegisterButtonPush(pin string, callback func(f
 		}
 	}
 	self.RegisterButtons([]string{pin}, helper)
-	}
+}
 
 func (self *PrinterButtonsModule) Register_button_push(pin string, callback func(float64)) {
 	self.RegisterButtonPush(pin, callback)
-	}
+}
 
 func buttonParamBool(value interface{}) bool {
 	switch typed := value.(type) {
@@ -313,7 +313,7 @@ func buttonParamBool(value interface{}) bool {
 		trimmed := strings.TrimSpace(fmt.Sprintf("%v", value))
 		return trimmed == "1" || strings.EqualFold(trimmed, "true")
 	}
-	}
+}
 
 func buttonParamInt(value interface{}) int {
 	switch typed := value.(type) {
@@ -343,4 +343,4 @@ func buttonParamInt(value interface{}) int {
 		}
 		return parsed
 	}
-	}
+}

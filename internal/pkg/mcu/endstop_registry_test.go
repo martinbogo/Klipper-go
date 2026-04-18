@@ -53,6 +53,18 @@ func TestBuildEndstopAddStepperPlanDetectsSharedAxisConflict(t *testing.T) {
 	if !plan.NeedsNewTrsync || !plan.SharedAxisConflict {
 		t.Fatalf("expected shared-axis conflict, got %#v", plan)
 	}
+	if got := plan.WarningMessage(); got != SharedAxisConflictWarning {
+		t.Fatalf("unexpected warning message %q", got)
+	}
+}
+
+func TestBuildEndstopAddStepperPlanWarningMessageEmptyWithoutConflict(t *testing.T) {
+	plan := BuildEndstopAddStepperPlan([]EndstopRegistryTrsync{
+		&fakeEndstopRegistryTrsync{mcuKey: "mcu0"},
+	}, &fakeEndstopRegistryStepper{mcuKey: "mcu0", name: "stepper_x"})
+	if got := plan.WarningMessage(); got != "" {
+		t.Fatalf("expected empty warning message, got %q", got)
+	}
 }
 
 func TestCollectEndstopSteppersFlattensTrsyncs(t *testing.T) {

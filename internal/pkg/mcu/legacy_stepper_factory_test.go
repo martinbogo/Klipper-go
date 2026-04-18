@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	motionpkg "goklipper/internal/pkg/motion"
 	printerpkg "goklipper/internal/pkg/printer"
 )
 
@@ -19,7 +20,7 @@ type fakeLegacyStepperPins struct {
 	lookupCalls []fakeLegacyStepperPinLookupCall
 }
 
-func (self *fakeLegacyStepperPins) Lookup_pin(pinDesc string, canInvert bool, canPullup bool, shareType interface{}) map[string]interface{} {
+func (self *fakeLegacyStepperPins) LookupPin(pinDesc string, canInvert bool, canPullup bool, shareType interface{}) map[string]interface{} {
 	self.lookupCalls = append(self.lookupCalls, fakeLegacyStepperPinLookupCall{
 		pinDesc:   pinDesc,
 		canInvert: canInvert,
@@ -33,7 +34,9 @@ func (self *fakeLegacyStepperPins) Lookup_pin(pinDesc string, canInvert bool, ca
 }
 
 type fakeLegacyStepperPrinter struct {
-	objects map[string]interface{}
+	objects            map[string]interface{}
+	registerEventCalls []string
+	sendEventCalls     []string
 }
 
 func (self *fakeLegacyStepperPrinter) LookupObject(name string, defaultValue interface{}) interface{} {
@@ -44,27 +47,114 @@ func (self *fakeLegacyStepperPrinter) LookupObject(name string, defaultValue int
 }
 
 func (self *fakeLegacyStepperPrinter) RegisterEventHandler(event string, callback func([]interface{}) error) {
+	self.registerEventCalls = append(self.registerEventCalls, event)
+	_ = callback
 }
 
-func (self *fakeLegacyStepperPrinter) SendEvent(event string, params []interface{}) {}
+func (self *fakeLegacyStepperPrinter) SendEvent(event string, params []interface{}) {
+	self.sendEventCalls = append(self.sendEventCalls, event)
+	_ = params
+}
+
+type fakeLegacyStepperController struct {
+	nextOID                 int
+	registeredConfigActions []func()
+	registeredStepqueues    []interface{}
+	constants               map[string]interface{}
+}
+
+func (self *fakeLegacyStepperController) CreateOID() int {
+	oid := self.nextOID
+	self.nextOID++
+	return oid
+}
+
+func (self *fakeLegacyStepperController) RegisterConfigCallback(cb func()) {
+	self.registeredConfigActions = append(self.registeredConfigActions, cb)
+}
+
+func (self *fakeLegacyStepperController) Register_stepqueue(stepqueue interface{}) {
+	self.registeredStepqueues = append(self.registeredStepqueues, stepqueue)
+}
+
+func (self *fakeLegacyStepperController) Get_constants() map[string]interface{} {
+	if self.constants == nil {
+		return map[string]interface{}{}
+	}
+	return self.constants
+}
+
+func (self *fakeLegacyStepperController) Seconds_to_clock(time float64) int64 {
+	return int64(time * 1000)
+}
+
+func (self *fakeLegacyStepperController) Get_max_stepper_error() float64 {
+	return 0.000025
+}
+
+func (self *fakeLegacyStepperController) Add_config_cmd(cmd string, is_init bool, on_restart bool) {
+	_, _, _ = cmd, is_init, on_restart
+}
+
+func (self *fakeLegacyStepperController) Lookup_command_tag(msgformat string) interface{} {
+	_ = msgformat
+	return 0
+}
+
+func (self *fakeLegacyStepperController) LookupQueryCommand(msgformat string, respformat string, oid int, cq interface{}, isAsync bool) interface{} {
+	_, _, _, _, _ = msgformat, respformat, oid, cq, isAsync
+	return nil
+}
+
+func (self *fakeLegacyStepperController) Is_fileoutput() bool {
+	return false
+}
+
+func (self *fakeLegacyStepperController) Estimated_print_time(eventtime float64) float64 {
+	return eventtime
+}
+
+func (self *fakeLegacyStepperController) Print_time_to_clock(print_time float64) int64 {
+	return int64(print_time * 1000)
+}
 
 func (self *fakeLegacyStepperPrinter) CurrentExtruderName() string { return "extruder" }
 
-func (self *fakeLegacyStepperPrinter) AddObject(name string, obj interface{}) error { return nil }
+func (self *fakeLegacyStepperPrinter) AddObject(name string, obj interface{}) error {
+	if self.objects == nil {
+		self.objects = map[string]interface{}{}
+	}
+	self.objects[name] = obj
+	return nil
+}
 
-func (self *fakeLegacyStepperPrinter) LookupObjects(module string) []interface{} { return nil }
+func (self *fakeLegacyStepperPrinter) LookupObjects(module string) []interface{} {
+	_ = module
+	return nil
+}
 
-func (self *fakeLegacyStepperPrinter) HasStartArg(name string) bool { return false }
+func (self *fakeLegacyStepperPrinter) HasStartArg(name string) bool {
+	_ = name
+	return false
+}
 
-func (self *fakeLegacyStepperPrinter) LookupHeater(name string) printerpkg.HeaterRuntime { return nil }
+func (self *fakeLegacyStepperPrinter) LookupHeater(name string) printerpkg.HeaterRuntime {
+	_ = name
+	return nil
+}
 
 func (self *fakeLegacyStepperPrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry {
 	return nil
 }
 
-func (self *fakeLegacyStepperPrinter) LookupMCU(name string) printerpkg.MCURuntime { return nil }
+func (self *fakeLegacyStepperPrinter) LookupMCU(name string) printerpkg.MCURuntime {
+	_ = name
+	return nil
+}
 
-func (self *fakeLegacyStepperPrinter) InvokeShutdown(msg string) {}
+func (self *fakeLegacyStepperPrinter) InvokeShutdown(msg string) {
+	_ = msg
+}
 
 func (self *fakeLegacyStepperPrinter) IsShutdown() bool { return false }
 
@@ -93,6 +183,24 @@ type fakeLegacyStepperConfig struct {
 	name           string
 	values         map[string]interface{}
 	floatNoneCalls []fakeLegacyStepperFloatNoneCall
+}
+
+type fakeLegacyStepperEnableModule struct {
+	config  interface{}
+	stepper stepperEnableStepper
+}
+
+func (self *fakeLegacyStepperEnableModule) Register_stepper(config interface{}, stepper stepperEnableStepper) {
+	self.config = config
+	self.stepper = stepper
+}
+
+type fakeLegacyForceMoveModule struct {
+	stepper motionpkg.ForceMoveStepperDriver
+}
+
+func (self *fakeLegacyForceMoveModule) RegisterStepper(stepper motionpkg.ForceMoveStepperDriver) {
+	self.stepper = stepper
 }
 
 func (self *fakeLegacyStepperConfig) Name() string {
@@ -186,21 +294,6 @@ func (self *fakeLegacyStepperConfig) GetfloatNone(option string, default1 interf
 	return default1
 }
 
-type fakeLegacyStepperModuleRegistrar struct {
-	registrationCalls []string
-	modules           []interface{}
-}
-
-func (self *fakeLegacyStepperModuleRegistrar) RegisterStepperEnable(module interface{}) {
-	self.registrationCalls = append(self.registrationCalls, "stepper_enable")
-	self.modules = append(self.modules, module)
-}
-
-func (self *fakeLegacyStepperModuleRegistrar) RegisterForceMove(module interface{}) {
-	self.registrationCalls = append(self.registrationCalls, "force_move")
-	self.modules = append(self.modules, module)
-}
-
 func TestBuildLegacyStepperFactoryPlanBuildsStepAndDirectionSetup(t *testing.T) {
 	pins := &fakeLegacyStepperPins{responses: map[string]map[string]interface{}{
 		"PA0": {"pin": "PA0", "chip_name": "mcu", "invert": 0, "pullup": 0},
@@ -273,23 +366,163 @@ func TestBuildLegacyStepperFactoryPlanPanicsWithoutPinResolver(t *testing.T) {
 
 func TestRegisterLegacyStepperModulesLoadsKnownModulesInOrder(t *testing.T) {
 	loadCalls := []string{}
+	registrationCalls := []string{}
+	registeredModules := []interface{}{}
 	modules := map[string]interface{}{
 		"stepper_enable": "enable-module",
 	}
-	registrar := &fakeLegacyStepperModuleRegistrar{}
 
 	RegisterLegacyStepperModules(func(moduleName string) interface{} {
 		loadCalls = append(loadCalls, moduleName)
 		return modules[moduleName]
-	}, registrar)
+	}, func(module interface{}) {
+		registrationCalls = append(registrationCalls, "stepper_enable")
+		registeredModules = append(registeredModules, module)
+	}, func(module interface{}) {
+		registrationCalls = append(registrationCalls, "force_move")
+		registeredModules = append(registeredModules, module)
+	})
 
 	if got, want := loadCalls, []string{"stepper_enable", "force_move"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected module load order %v, want %v", got, want)
 	}
-	if got, want := registrar.registrationCalls, []string{"stepper_enable"}; !reflect.DeepEqual(got, want) {
+	if got, want := registrationCalls, []string{"stepper_enable"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected registration calls %v, want %v", got, want)
 	}
-	if got, want := registrar.modules, []interface{}{"enable-module"}; !reflect.DeepEqual(got, want) {
+	if got, want := registeredModules, []interface{}{"enable-module"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected registered modules %#v, want %#v", got, want)
+	}
+}
+
+func TestNewLegacyPrinterStepperRegistersConnectHandlerAndBindsSelf(t *testing.T) {
+	controller := &fakeLegacyStepperController{}
+	printer := &fakeLegacyStepperPrinter{}
+	stepper := NewLegacyPrinterStepper(
+		"stepper_x",
+		map[string]interface{}{"chip": controller, "pin": "PA0", "invert": 0},
+		map[string]interface{}{"chip": controller, "pin": "PA1", "invert": 0},
+		40.0,
+		200,
+		nil,
+		false,
+		printer,
+	)
+
+	if got, want := printer.registerEventCalls, []string{"project:connect"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected registered events %v, want %v", got, want)
+	}
+	if stepper.Raw() != stepper {
+		t.Fatalf("expected bound event self to be the stepper itself")
+	}
+	if len(controller.registeredConfigActions) != 1 {
+		t.Fatalf("expected one config callback registration, got %d", len(controller.registeredConfigActions))
+	}
+	if len(controller.registeredStepqueues) != 1 {
+		t.Fatalf("expected one stepqueue registration, got %d", len(controller.registeredStepqueues))
+	}
+}
+
+func TestLoadLegacyPrinterStepperBuildsAndRegistersModules(t *testing.T) {
+	controller := &fakeLegacyStepperController{}
+	pins := &fakeLegacyStepperPins{responses: map[string]map[string]interface{}{
+		"PA0": {"chip": controller, "pin": "PA0", "invert": 0, "pullup": 0},
+		"PB1": {"chip": controller, "pin": "PB1", "invert": 0, "pullup": 0},
+	}}
+	printer := &fakeLegacyStepperPrinter{objects: map[string]interface{}{"pins": pins}}
+	config := &fakeLegacyStepperConfig{
+		printer: printer,
+		name:    "stepper_x",
+		values: map[string]interface{}{
+			"step_pin":                "PA0",
+			"dir_pin":                 "PB1",
+			"rotation_distance":       40.0,
+			"microsteps":              16,
+			"full_steps_per_rotation": 200,
+		},
+	}
+	loadCalls := []string{}
+	var enableStepper *LegacyStepper
+	var forceMoveStepper *LegacyStepper
+
+	stepper := LoadLegacyPrinterStepper(config, false, printer, func(moduleName string) interface{} {
+		loadCalls = append(loadCalls, moduleName)
+		return moduleName + "-module"
+	}, func(module interface{}, stepper *LegacyStepper) {
+		if module != "stepper_enable-module" {
+			t.Fatalf("unexpected stepper_enable module %#v", module)
+		}
+		enableStepper = stepper
+	}, func(module interface{}, stepper *LegacyStepper) {
+		if module != "force_move-module" {
+			t.Fatalf("unexpected force_move module %#v", module)
+		}
+		forceMoveStepper = stepper
+	})
+
+	if stepper == nil {
+		t.Fatal("expected stepper to be created")
+	}
+	if enableStepper != stepper || forceMoveStepper != stepper {
+		t.Fatalf("expected module registrations to receive the created stepper")
+	}
+	if got, want := loadCalls, []string{"stepper_enable", "force_move"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected module load calls %v, want %v", got, want)
+	}
+	if got, want := printer.registerEventCalls, []string{"project:connect"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected registered events %v, want %v", got, want)
+	}
+}
+
+func TestLoadLegacyPrinterStepperWithDefaultModulesRegistersStandardModules(t *testing.T) {
+	controller := &fakeLegacyStepperController{}
+	pins := &fakeLegacyStepperPins{responses: map[string]map[string]interface{}{
+		"PA0": {"chip": controller, "pin": "PA0", "invert": 0, "pullup": 0},
+		"PB1": {"chip": controller, "pin": "PB1", "invert": 0, "pullup": 0},
+	}}
+	printer := &fakeLegacyStepperPrinter{objects: map[string]interface{}{"pins": pins}}
+	config := &fakeLegacyStepperConfig{
+		printer: printer,
+		name:    "manual_stepper select_stepper",
+		values: map[string]interface{}{
+			"step_pin":                "PA0",
+			"dir_pin":                 "PB1",
+			"rotation_distance":       40.0,
+			"microsteps":              16,
+			"full_steps_per_rotation": 200,
+		},
+	}
+	stepperEnableModule := &fakeLegacyStepperEnableModule{}
+	forceMoveModule := &fakeLegacyForceMoveModule{}
+	loadCalls := []string{}
+
+	stepper := LoadLegacyPrinterStepperWithDefaultModules(config, false, printer, func(moduleName string) interface{} {
+		loadCalls = append(loadCalls, moduleName)
+		switch moduleName {
+		case "stepper_enable":
+			return stepperEnableModule
+		case "force_move":
+			return forceMoveModule
+		default:
+			return nil
+		}
+	})
+
+	if stepper == nil {
+		t.Fatal("expected stepper to be created")
+	}
+	if stepperEnableModule.config != config {
+		t.Fatalf("expected stepper_enable registration to receive config %p, got %p", config, stepperEnableModule.config)
+	}
+	if registeredStepper, ok := stepperEnableModule.stepper.(*LegacyStepper); !ok || registeredStepper != stepper {
+		t.Fatalf("expected stepper_enable registration to receive the created stepper, got %#v", stepperEnableModule.stepper)
+	}
+	if registeredStepper, ok := forceMoveModule.stepper.(*LegacyStepper); !ok || registeredStepper != stepper {
+		t.Fatalf("expected force_move registration to receive the created stepper, got %#v", forceMoveModule.stepper)
+	}
+	if got, want := loadCalls, []string{"stepper_enable", "force_move"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected module load calls %v, want %v", got, want)
+	}
+	if got, want := printer.registerEventCalls, []string{"project:connect"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected registered events %v, want %v", got, want)
 	}
 }

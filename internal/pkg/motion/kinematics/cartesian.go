@@ -80,6 +80,10 @@ func (self *CartesianKinematics) GetSteppers() []Stepper {
 	return steppers
 }
 
+func (self *CartesianKinematics) Rails() []Rail {
+	return append([]Rail{}, self.rails...)
+}
+
 func (self *CartesianKinematics) CalcPosition(stepperPositions map[string]float64) []float64 {
 	position := make([]float64, 0, len(self.rails))
 	for _, rail := range self.rails {

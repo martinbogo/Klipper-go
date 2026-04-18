@@ -19,17 +19,24 @@ func BuildToolheadFlushReset(lookaheadFlushTime float64) ToolheadFlushReset {
 }
 
 type ToolheadFlushConfig struct {
-	BufferTimeLow    float64
-	BgFlushLowTime   float64
-	BgFlushBatchTime float64
-	BgFlushExtraTime float64
+	BufferTimeLow         float64
+	BgFlushLowTime        float64
+	BgFlushHighTime       float64
+	BgFlushSgLowTime      float64
+	BgFlushSgHighTime     float64
+	BgFlushBatchTime      float64
+	BgFlushExtraTime      float64
+	StepcompressFlushTime float64
 }
 
 type ToolheadFlushHandlerState struct {
 	PrintTime           float64
 	LastFlushTime       float64
+	LastStepGenTime     float64
 	NeedFlushTime       float64
+	NeedStepGenTime     float64
 	SpecialQueuingState string
+	KinFlushDelay       float64
 }
 
 type ToolheadFlushHandlerPlan struct {
@@ -50,21 +57,44 @@ func BuildToolheadFlushHandlerPlan(eventtime float64, estimatedPrintTime float64
 
 	plan := ToolheadFlushHandlerPlan{ShouldFlushLookahead: state.SpecialQueuingState == ""}
 	lastFlushTime := state.LastFlushTime
-	for {
-		endFlush := state.NeedFlushTime + config.BgFlushExtraTime
-		if lastFlushTime >= endFlush {
-			plan.ReturnNever = true
-			plan.KickFlushTimer = true
+	lastStepGenTime := state.LastStepGenTime
+	aggressiveStepGenTime := state.NeedStepGenTime - 2.0*state.KinFlushDelay
+	if lastStepGenTime < aggressiveStepGenTime {
+		wantStepGenTime := estimatedPrintTime + config.BgFlushSgHighTime
+		batchTime := config.BgFlushSgHighTime - config.BgFlushSgLowTime
+		nextBatchTime := lastStepGenTime + batchTime
+		if nextBatchTime > estimatedPrintTime {
+			if nextBatchTime > wantStepGenTime+0.005 {
+				nextBatchTime = lastStepGenTime
+			}
+			wantStepGenTime = nextBatchTime
+		}
+		wantStepGenTime = math.Min(wantStepGenTime, aggressiveStepGenTime)
+		if wantStepGenTime > lastStepGenTime {
+			flushTime := math.Max(lastFlushTime, wantStepGenTime-config.StepcompressFlushTime)
+			plan.AdvanceFlushTimes = append(plan.AdvanceFlushTimes, flushTime)
+			lastFlushTime = flushTime
+			lastStepGenTime = wantStepGenTime
+		}
+		if lastStepGenTime < aggressiveStepGenTime {
+			plan.NextWakeTime = eventtime + lastStepGenTime - config.BgFlushSgLowTime - estimatedPrintTime
 			return plan
 		}
-		bufferTime := lastFlushTime - estimatedPrintTime
-		if bufferTime > config.BgFlushLowTime {
-			plan.NextWakeTime = eventtime + bufferTime - config.BgFlushLowTime
-			return plan
-		}
-		flushTime := math.Min(endFlush, estimatedPrintTime+config.BgFlushLowTime+config.BgFlushBatchTime)
-		flushTime = math.Max(flushTime, lastFlushTime)
-		plan.AdvanceFlushTimes = append(plan.AdvanceFlushTimes, flushTime)
-		lastFlushTime = flushTime
 	}
+
+	endFlush := state.NeedFlushTime + config.BgFlushExtraTime
+	if lastFlushTime < endFlush {
+		flushTime := math.Min(estimatedPrintTime+config.BgFlushHighTime, endFlush)
+		if flushTime > lastFlushTime {
+			plan.AdvanceFlushTimes = append(plan.AdvanceFlushTimes, flushTime)
+			lastFlushTime = flushTime
+		}
+	}
+	if lastFlushTime >= endFlush {
+		plan.ReturnNever = true
+		plan.KickFlushTimer = true
+		return plan
+	}
+	plan.NextWakeTime = eventtime + lastFlushTime - config.BgFlushLowTime - estimatedPrintTime
+	return plan
 }

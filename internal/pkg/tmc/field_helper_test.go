@@ -106,3 +106,32 @@ func TestFieldHelperPrettyFormatAndAccessors(t *testing.T) {
 		t.Fatalf("expected register field snapshot to include enabled flag, got %#v", fields)
 	}
 }
+
+func TestFieldHelperTracksRegisterFirstTouchOrder(t *testing.T) {
+	helper := NewFieldHelper(
+		map[string]map[string]int64{
+			"REG_A": {"a": 1 << 0},
+			"REG_B": {"b": 1 << 0},
+			"REG_C": {"c": 1 << 0},
+		},
+		nil,
+		nil,
+		nil,
+	)
+
+	helper.Set_field("b", 1, nil, nil)
+	helper.Set_field("a", 1, nil, nil)
+	helper.Set_field("b", 0, nil, nil)
+	helper.Set_field("c", 1, nil, nil)
+
+	got := helper.orderedRegisterNames()
+	want := []string{"REG_B", "REG_A", "REG_C"}
+	if len(got) != len(want) {
+		t.Fatalf("orderedRegisterNames length = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("orderedRegisterNames[%d] = %q, want %q (%#v)", i, got[i], want[i], got)
+		}
+	}
+}

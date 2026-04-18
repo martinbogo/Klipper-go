@@ -49,8 +49,6 @@ func (self *ReactorGreenlet) goGreenlet() {
 				logger.Error("panic:", sys.GetGID(), err, s)
 			}
 		}
-		lock.Lock()
-		defer lock.Unlock()
 		greenlet.Delete(self.GId) //delete greenlet when task end
 		self.state = "end"
 		self.GId = 0

@@ -513,3 +513,92 @@ func TestPrinterHeatersSetupHeaterAndWaitForTemperature(t *testing.T) {
 		t.Fatalf("unexpected wait status output: %#v", gcode.rawResponses)
 	}
 }
+
+func TestPrinterHeatersSetupBedHeaterDefaultsMinExtrudeTempToZero(t *testing.T) {
+	gcode := &fakeHeaterGCode{}
+	reactor := &fakeHeaterReactor{now: 10.0}
+	pwm := &fakeHeaterPWMPin{mcu: &fakeHeaterMCU{estimatedPrintTime: 10.0}}
+	pins := &fakeHeaterPins{pwm: pwm}
+	printer := &fakeHeaterPrinter{
+		lookup: map[string]interface{}{
+			"pins":     pins,
+			"toolhead": &fakeHeaterToolhead{},
+		},
+		gcode:   gcode,
+		reactor: reactor,
+	}
+	baseConfig := &fakeHeaterConfig{
+		printer:    printer,
+		name:       "heaters",
+		hasOptions: map[string]bool{},
+		supportConfigErrors: map[string]error{
+			"temperature_sensors.cfg": nil,
+		},
+	}
+	module := NewPrinterHeaters(baseConfig)
+	printer.lookup["heaters"] = module
+	module.Add_sensor_factory("test-sensor", printerpkg.TemperatureSensorFactory(func(config printerpkg.ModuleConfig) printerpkg.TemperatureSensor {
+		return &fakeHeaterSensor{reportDelta: 0.25}
+	}))
+
+	sectionConfig := newHeaterSectionConfig(printer, "heater_bed")
+	sectionConfig.floats["max_temp"] = 140.
+	delete(sectionConfig.floats, "min_extrude_temp")
+	delete(sectionConfig.hasOptions, "min_extrude_temp")
+
+	heater := module.Setup_heater(sectionConfig, "B")
+	if heater == nil {
+		t.Fatalf("expected heater instance")
+	}
+	if got := heater.Min_extrude_temp; got != 0 {
+		t.Fatalf("bed heater min_extrude_temp = %v, want 0", got)
+	}
+	if !heater.Can_extrude {
+		t.Fatalf("expected non-extruder heater to be immediately extrudable-safe")
+	}
+	if module.Gcode_id_to_sensor["B"] != heater {
+		t.Fatalf("expected bed heater gcode registration")
+	}
+	if gcode.muxHandlers["SET_HEATER_TEMPERATURE"]["heater_bed"] == nil {
+		t.Fatalf("expected SET_HEATER_TEMPERATURE mux handler for heater_bed")
+	}
+	if !reflect.DeepEqual(sectionConfig.loadObjectCalls, []string{"verify_heater heater_bed", "pid_calibrate"}) {
+		t.Fatalf("unexpected dependent object load calls: %#v", sectionConfig.loadObjectCalls)
+	}
+	if !reflect.DeepEqual(pins.setupPins, []string{"PA0"}) {
+		t.Fatalf("unexpected PWM setup calls: %#v", pins.setupPins)
+	}
+	if len(pwm.cycleCalls) != 1 || pwm.cycleCalls[0].cycleTime != 0.1 {
+		t.Fatalf("unexpected cycle time calls: %#v", pwm.cycleCalls)
+	}
+	if len(pwm.maxDurations) != 1 || pwm.maxDurations[0] != MAX_HEAT_TIME {
+		t.Fatalf("unexpected max duration calls: %#v", pwm.maxDurations)
+	}
+	if !reflect.DeepEqual(module.Available_heaters, []string{"heater_bed"}) {
+		t.Fatalf("unexpected available heaters: %#v", module.Available_heaters)
+	}
+	if module.Lookup_heater("heater_bed") != heater {
+		t.Fatalf("expected lookup to return registered bed heater")
+	}
+	if !reflect.DeepEqual(module.Available_sensors, []string{"heater_bed"}) {
+		t.Fatalf("unexpected available sensors: %#v", module.Available_sensors)
+	}
+	if heater.Max_temp != 140. {
+		t.Fatalf("unexpected bed heater max_temp: %v", heater.Max_temp)
+	}
+	if heater.Min_temp != 10. {
+		t.Fatalf("unexpected bed heater min_temp: %v", heater.Min_temp)
+	}
+	if got := heater.Get_max_power(); got != 0.8 {
+		t.Fatalf("unexpected bed heater max power: %v", got)
+	}
+	if got := heater.Get_smooth_time(); got != 1.0 {
+		t.Fatalf("unexpected bed heater smooth time: %v", got)
+	}
+	if got := heater.Name; got != "heater_bed" {
+		t.Fatalf("unexpected heater name: %q", got)
+	}
+	if got := heater.Sensor.(*fakeHeaterSensor).maxTemp; got != 140. {
+		t.Fatalf("sensor max temp = %v, want 140", got)
+	}
+}

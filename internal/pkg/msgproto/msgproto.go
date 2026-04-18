@@ -6,9 +6,9 @@ import (
 	"container/list"
 	"encoding/json"
 	"fmt"
-	"io"
 	"goklipper/common/logger"
 	"goklipper/common/utils/reflects"
+	"io"
 	"math"
 	"reflect"
 	"strconv"
@@ -48,7 +48,7 @@ type PT interface {
 
 func Crc16_ccitt(buf []int) []int {
 	var _crc = 0xffff
-	for data := range buf {
+	for _, data := range buf {
 		data ^= _crc & 0xff
 		data ^= (data & 0x0f) << 4
 		_crc = ((data << 8) | (_crc >> 8)) ^ (data >> 4) ^ (data << 3)
@@ -205,7 +205,7 @@ func (self *PT_string) Encode(out *[]int, value interface{}) {
 
 func (self *PT_string) Parse(s []int, pos int) (interface{}, int) {
 	l := s[pos]
-	if pos+l+1 >= len(s) {
+	if pos+l+1 > len(s) {
 		return s[0:0], 0
 	}
 	return s[pos+1 : pos+l+1], pos + l + 1
@@ -933,17 +933,14 @@ func (self *MessageParser) Process_identify(_data []byte, decompress bool) {
 	all_messages := map[string]int{}
 	command_tags := []int{}
 	for k, v := range commands {
-		logger.Infof("Dictionary CMD: %d -> '%s'", int(v.(float64)), k)
 		command_tags = append(command_tags, int(v.(float64)))
 		all_messages[k] = int(v.(float64))
 	}
 	for k, v := range responses {
-		logger.Infof("Dictionary RSP: %d -> '%s'", int(v.(float64)), k)
 		all_messages[k] = int(v.(float64))
 	}
 	output_tags := []int{}
 	for k, v := range output {
-		logger.Infof("Dictionary OUT: %d -> '%s'", v, k)
 		output_tags = append(output_tags, v)
 		all_messages[k] = v
 	}

@@ -10,6 +10,77 @@ func (self *fakeUARTMuxActivator) Activate(instanceID []int64) {
 	self.activations = append(self.activations, append([]int64(nil), instanceID...))
 }
 
+type fakeUARTMuxCommand struct {
+	sends [][]int64
+}
+
+func (self *fakeUARTMuxCommand) Send(data interface{}, minclock, reqclock int64) {
+	self.sends = append(self.sends, append([]int64(nil), data.([]int64)...))
+	_ = minclock
+	_ = reqclock
+}
+
+type fakeUARTMuxOwner struct {
+	nextOID    int
+	configCmds []string
+	callback   func()
+	command    *fakeUARTMuxCommand
+}
+
+func (self *fakeUARTMuxOwner) CreateOID() int {
+	oid := self.nextOID
+	self.nextOID++
+	return oid
+}
+
+func (self *fakeUARTMuxOwner) AddConfigCmd(cmd string, isInit, onRestart bool) {
+	self.configCmds = append(self.configCmds, cmd)
+	_ = isInit
+	_ = onRestart
+}
+
+func (self *fakeUARTMuxOwner) RegisterConfigCallback(callback func()) {
+	self.callback = callback
+}
+
+func (self *fakeUARTMuxOwner) LookupCommand(msgformat string, cmdQueue interface{}) (UARTMuxCommand, error) {
+	_ = msgformat
+	_ = cmdQueue
+	return self.command, nil
+}
+
+func TestUARTAnalogMuxRuntimeConfiguresPinsAndOnlySendsChanges(t *testing.T) {
+	owner := &fakeUARTMuxOwner{nextOID: 7, command: &fakeUARTMuxCommand{}}
+	runtime := NewUARTAnalogMuxRuntime(owner, "cmdq", []interface{}{"p1", "p2"})
+
+	if len(owner.configCmds) != 2 {
+		t.Fatalf("expected two config commands, got %d", len(owner.configCmds))
+	}
+	if owner.callback == nil {
+		t.Fatal("expected config callback registration")
+	}
+	owner.callback()
+
+	runtime.Activate([]int64{1, 0})
+	runtime.Activate([]int64{1, 1})
+
+	if len(owner.command.sends) != 3 {
+		t.Fatalf("expected three pin updates, got %d", len(owner.command.sends))
+	}
+	if owner.command.sends[0][0] != 7 || owner.command.sends[0][1] != 1 {
+		t.Fatalf("unexpected first send %#v", owner.command.sends[0])
+	}
+	if owner.command.sends[1][0] != 8 || owner.command.sends[1][1] != 0 {
+		t.Fatalf("unexpected second send %#v", owner.command.sends[1])
+	}
+	if owner.command.sends[2][0] != 8 || owner.command.sends[2][1] != 1 {
+		t.Fatalf("unexpected third send %#v", owner.command.sends[2])
+	}
+	if got := runtime.Pins(); len(got) != 2 || got[0] != "p1" || got[1] != "p2" {
+		t.Fatalf("unexpected mux pins %#v", got)
+	}
+}
+
 func TestUARTMutexCacheReusesEntry(t *testing.T) {
 	cache := NewUARTMutexCache()
 	factoryCalls := 0

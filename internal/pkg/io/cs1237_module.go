@@ -19,7 +19,7 @@ type cs1237Toolhead interface {
 }
 
 type cs1237Command interface {
-	Send(args []int64, minclock int64, reqclock int64)
+	Send(data interface{}, minclock int64, reqclock int64)
 }
 
 type cs1237MCU interface {

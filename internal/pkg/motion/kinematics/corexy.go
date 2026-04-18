@@ -76,6 +76,10 @@ func (self *CoreXYKinematics) GetSteppers() []Stepper {
 	return steppers
 }
 
+func (self *CoreXYKinematics) Rails() []Rail {
+	return append([]Rail{}, self.rails...)
+}
+
 func (self *CoreXYKinematics) CalcPosition(stepperPositions map[string]float64) []float64 {
 	pos := make([]float64, 0, len(self.rails))
 	for _, rail := range self.rails {
@@ -98,7 +102,27 @@ func (self *CoreXYKinematics) NoteZNotHomed() {
 }
 
 func (self *CoreXYKinematics) Home(homingState HomingState) {
-	for _, axis := range homingState.GetAxes() {
+	axes := homingState.GetAxes()
+	if len(axes) > 1 {
+		xIndex := -1
+		yIndex := -1
+		for i, axis := range axes {
+			switch axis {
+			case 0:
+				if xIndex == -1 {
+					xIndex = i
+				}
+			case 1:
+				if yIndex == -1 {
+					yIndex = i
+				}
+			}
+		}
+		if xIndex != -1 && yIndex != -1 && xIndex < yIndex {
+			axes[xIndex], axes[yIndex] = axes[yIndex], axes[xIndex]
+		}
+	}
+	for _, axis := range axes {
 		rail := self.rails[axis]
 		positionMin, positionMax := rail.Get_range()
 		hi := rail.Get_homing_info()

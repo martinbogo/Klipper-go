@@ -19,6 +19,15 @@ type EndstopAddStepperPlan struct {
 	SharedAxisConflict bool
 }
 
+const SharedAxisConflictWarning = "Multi-mcu homing not supported on multi-mcu shared axis"
+
+func (self EndstopAddStepperPlan) WarningMessage() string {
+	if self.SharedAxisConflict {
+		return SharedAxisConflictWarning
+	}
+	return ""
+}
+
 func BuildEndstopAddStepperPlan(trsyncs []EndstopRegistryTrsync, stepper EndstopRegistryStepper) EndstopAddStepperPlan {
 	plan := EndstopAddStepperPlan{TrsyncIndex: len(trsyncs), NeedsNewTrsync: true}
 	for i, trsync := range trsyncs {

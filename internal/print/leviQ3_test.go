@@ -2,11 +2,106 @@ package print
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"reflect"
 	"testing"
 	"time"
 )
+
+func TestFuncConfigSourceUsesCallbacksAndFallbacks(t *testing.T) {
+	source := FuncConfigSource{
+		Float64Func: func(key string, fallback float64) float64 {
+			if key == "speed" {
+				return fallback + 1.5
+			}
+			return fallback
+		},
+		IntFunc: func(key string, fallback int) int {
+			if key == "count" {
+				return fallback + 2
+			}
+			return fallback
+		},
+		BoolFunc: func(key string, fallback bool) bool {
+			if key == "enabled" {
+				return !fallback
+			}
+			return fallback
+		},
+		Float64SliceFunc: func(key string, fallback []float64) []float64 {
+			if key == "points" {
+				return []float64{1, 2, 3}
+			}
+			return append([]float64(nil), fallback...)
+		},
+		StringFunc: func(key string, fallback string) string {
+			if key == "profile" {
+				return fallback + "-custom"
+			}
+			return fallback
+		},
+	}
+
+	if got := source.Float64("speed", 2.5); math.Abs(got-4.0) > 1e-9 {
+		t.Fatalf("Float64() = %v, want 4.0", got)
+	}
+	if got := source.Int("count", 3); got != 5 {
+		t.Fatalf("Int() = %d, want 5", got)
+	}
+	if got := source.Bool("enabled", true); got {
+		t.Fatal("Bool() = true, want false")
+	}
+	if got := source.String("profile", "leviq3"); got != "leviq3-custom" {
+		t.Fatalf("String() = %q, want %q", got, "leviq3-custom")
+	}
+	if got := source.Float64Slice("points", []float64{9, 9}); !reflect.DeepEqual(got, []float64{1, 2, 3}) {
+		t.Fatalf("Float64Slice() = %#v, want %#v", got, []float64{1.0, 2.0, 3.0})
+	}
+
+	var fallbackSource FuncConfigSource
+	fallback := []float64{4, 5}
+	gotFallback := fallbackSource.Float64Slice("missing", fallback)
+	if !reflect.DeepEqual(gotFallback, fallback) {
+		t.Fatalf("fallback Float64Slice() = %#v, want %#v", gotFallback, fallback)
+	}
+	gotFallback[0] = 99
+	if fallback[0] != 4 {
+		t.Fatalf("fallback slice was not cloned: %#v", fallback)
+	}
+	if got := fallbackSource.String("missing", "default"); got != "default" {
+		t.Fatalf("fallback String() = %q, want %q", got, "default")
+	}
+}
+
+func TestFuncStatusSinkInvokesCallbacks(t *testing.T) {
+	var infoCalls, errorCalls int
+	var infoMsg, errorMsg string
+	sink := FuncStatusSink{
+		InfofFunc: func(format string, args ...any) {
+			infoCalls++
+			infoMsg = format
+		},
+		ErrorfFunc: func(format string, args ...any) {
+			errorCalls++
+			errorMsg = format
+		},
+	}
+
+	sink.Infof("info %s", "message")
+	sink.Errorf("error %s", "message")
+
+	if infoCalls != 1 || infoMsg != "info %s" {
+		t.Fatalf("Infof callback = (%d, %q), want (1, %q)", infoCalls, infoMsg, "info %s")
+	}
+	if errorCalls != 1 || errorMsg != "error %s" {
+		t.Fatalf("Errorf callback = (%d, %q), want (1, %q)", errorCalls, errorMsg, "error %s")
+	}
+
+	var nilSink FuncStatusSink
+	nilSink.Infof("ignored")
+	nilSink.Errorf("ignored")
+}
 
 type fakeLeviQ3Motion struct {
 	temperature float64
@@ -239,6 +334,53 @@ func TestPersistentStateJSONRoundTripPreservesCurrentZOffset(t *testing.T) {
 	}
 	if !reflect.DeepEqual(roundTrip.SavedMesh.CloneMatrix(), mesh.CloneMatrix()) {
 		t.Fatalf("saved mesh matrix = %#v, want %#v", roundTrip.SavedMesh.CloneMatrix(), mesh.CloneMatrix())
+	}
+}
+
+func TestRestorePersistentStateValueRestoresDecodedSaveVariablePayload(t *testing.T) {
+	helper := newTestLeviQ3Helper(t, nil, MapConfigSource{})
+	encoded, err := json.Marshal(NewLeviQ3PersistedStateRecord(0.55, LeviQ3PersistentState{
+		SavedZOffset:           0.55,
+		LastAutoZOffset:        0.56,
+		LastAutoZOffsetSamples: []float64{0.1, 0.2},
+		LastAppliedOffsets:     XYZ{X: 1, Y: 2, Z: 0.55},
+	}))
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var raw any
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if err := helper.RestorePersistentStateValue(raw); err != nil {
+		t.Fatalf("RestorePersistentStateValue() error = %v", err)
+	}
+	if got := helper.CurrentZOffset(); math.Abs(got-0.55) > 1e-9 {
+		t.Fatalf("CurrentZOffset() = %v, want 0.55", got)
+	}
+	if got := helper.PersistentState().LastAppliedOffsets; got != (XYZ{X: 1, Y: 2, Z: 0.55}) {
+		t.Fatalf("LastAppliedOffsets = %#v", got)
+	}
+}
+
+func TestPersistentStateSaveVariableValueReturnsJSONPayload(t *testing.T) {
+	helper := newTestLeviQ3Helper(t, nil, MapConfigSource{})
+	helper.RestorePersistentState(LeviQ3PersistentState{SavedZOffset: 0.61})
+
+	value, err := helper.PersistentStateSaveVariableValue()
+	if err != nil {
+		t.Fatalf("PersistentStateSaveVariableValue() error = %v", err)
+	}
+	if value == "" {
+		t.Fatal("expected non-empty save-variable payload")
+	}
+	var decoded LeviQ3PersistedStateRecord
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if math.Abs(decoded.CurrentZOffset-0.61) > 1e-9 {
+		t.Fatalf("CurrentZOffset = %v, want 0.61", decoded.CurrentZOffset)
 	}
 }
 

@@ -37,6 +37,19 @@ func TestBuildConfigPlanSupportsNilUpdater(t *testing.T) {
 	}
 }
 
+func TestBuildConfigPlanCRCIgnoresRestartAndInitCommands(t *testing.T) {
+	base := BuildConfigPlan(1, []string{"config_a"}, []string{"restart_a"}, []string{"init_a"}, nil)
+	changedRestart := BuildConfigPlan(1, []string{"config_a"}, []string{"restart_b"}, []string{"init_a"}, nil)
+	changedInit := BuildConfigPlan(1, []string{"config_a"}, []string{"restart_a"}, []string{"init_b"}, nil)
+
+	if base.ConfigCRC != changedRestart.ConfigCRC {
+		t.Fatalf("expected restart command changes to leave config CRC unchanged")
+	}
+	if base.ConfigCRC != changedInit.ConfigCRC {
+		t.Fatalf("expected init command changes to leave config CRC unchanged")
+	}
+}
+
 func TestBuildConnectionPlanModes(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -71,5 +84,55 @@ func TestBuildConnectionPlanTracksResetAndRTS(t *testing.T) {
 	cheetahPlan := BuildConnectionPlan(false, "cheetah", "/dev/ttyUSB0", 250000, false, true)
 	if cheetahPlan.RTS {
 		t.Fatalf("expected cheetah UART plan to disable RTS")
+	}
+}
+
+func TestExecuteConnectionPlanRoutesTransportAndClockSync(t *testing.T) {
+	steps := []string{}
+	ExecuteConnectionPlan(ConnectionPlan{Mode: ConnectionModeUART, RTS: false, NeedsClockSyncConnect: true}, "/dev/ttyUSB0", 250000, ConnectionExecutionHooks{
+		ConnectUART: func(serialPort string, baud int, rts bool) {
+			steps = append(steps, fmt.Sprintf("uart:%s:%d:%t", serialPort, baud, rts))
+		},
+		ConnectClockSync: func() {
+			steps = append(steps, "clock")
+		},
+	})
+	expected := []string{"uart:/dev/ttyUSB0:250000:false", "clock"}
+	if len(steps) != len(expected) {
+		t.Fatalf("unexpected step count %#v", steps)
+	}
+	for i, step := range expected {
+		if steps[i] != step {
+			t.Fatalf("unexpected execution order %#v", steps)
+		}
+	}
+}
+
+func TestExecuteConnectionPlanSupportsCanbusAndFileoutput(t *testing.T) {
+	steps := []string{}
+	ExecuteConnectionPlan(ConnectionPlan{Mode: ConnectionModeCanbus, NeedsClockSyncConnect: true}, "canbus", 0, ConnectionExecutionHooks{
+		ConnectCanbus: func() {
+			steps = append(steps, "canbus")
+		},
+		ConnectClockSync: func() {
+			steps = append(steps, "clock")
+		},
+	})
+	ExecuteConnectionPlan(ConnectionPlan{Mode: ConnectionModeFileoutput}, "/tmp/out", 0, ConnectionExecutionHooks{
+		ConnectFileoutput: func() {
+			steps = append(steps, "fileoutput")
+		},
+		ConnectClockSync: func() {
+			steps = append(steps, "unexpected-clock")
+		},
+	})
+	expected := []string{"canbus", "clock", "fileoutput"}
+	if len(steps) != len(expected) {
+		t.Fatalf("unexpected step count %#v", steps)
+	}
+	for i, step := range expected {
+		if steps[i] != step {
+			t.Fatalf("unexpected execution order %#v", steps)
+		}
 	}
 }

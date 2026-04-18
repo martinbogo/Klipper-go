@@ -1,0 +1,497 @@
+{
+  "elapsed_s": 9.587,
+  "loops": 12,
+  "results": [
+    {
+      "phase": "ready",
+      "response": {
+        "id": 1000,
+        "result": {
+          "ready": true,
+          "state": "ready",
+          "state_message": "Printer is ready"
+        }
+      }
+    },
+    {
+      "loop": 0,
+      "response": {
+        "id": 1001,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 0,
+      "response": {
+        "id": 1002,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 0,
+      "response": {
+        "id": 1003,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 0,
+      "response": {
+        "id": 1004,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 0,
+      "response": {
+        "id": 1005,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 1,
+      "response": {
+        "id": 1006,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 1,
+      "response": {
+        "id": 1007,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 1,
+      "response": {
+        "id": 1008,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 1,
+      "response": {
+        "id": 1009,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 1,
+      "response": {
+        "id": 1010,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 2,
+      "response": {
+        "id": 1011,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 2,
+      "response": {
+        "id": 1012,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 2,
+      "response": {
+        "id": 1013,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 2,
+      "response": {
+        "id": 1014,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 2,
+      "response": {
+        "id": 1015,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 3,
+      "response": {
+        "id": 1016,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 3,
+      "response": {
+        "id": 1017,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 3,
+      "response": {
+        "id": 1018,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 3,
+      "response": {
+        "id": 1019,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 3,
+      "response": {
+        "id": 1020,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 4,
+      "response": {
+        "id": 1021,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 4,
+      "response": {
+        "id": 1022,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 4,
+      "response": {
+        "id": 1023,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 4,
+      "response": {
+        "id": 1024,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 4,
+      "response": {
+        "id": 1025,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 5,
+      "response": {
+        "id": 1026,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 5,
+      "response": {
+        "id": 1027,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 5,
+      "response": {
+        "id": 1028,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 5,
+      "response": {
+        "id": 1029,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 5,
+      "response": {
+        "id": 1030,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 6,
+      "response": {
+        "id": 1031,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 6,
+      "response": {
+        "id": 1032,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 6,
+      "response": {
+        "id": 1033,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 6,
+      "response": {
+        "id": 1034,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 6,
+      "response": {
+        "id": 1035,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 7,
+      "response": {
+        "id": 1036,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 7,
+      "response": {
+        "id": 1037,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 7,
+      "response": {
+        "id": 1038,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 7,
+      "response": {
+        "id": 1039,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 7,
+      "response": {
+        "id": 1040,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 8,
+      "response": {
+        "id": 1041,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 8,
+      "response": {
+        "id": 1042,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 8,
+      "response": {
+        "id": 1043,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 8,
+      "response": {
+        "id": 1044,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 8,
+      "response": {
+        "id": 1045,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 9,
+      "response": {
+        "id": 1046,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 9,
+      "response": {
+        "id": 1047,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 9,
+      "response": {
+        "id": 1048,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 9,
+      "response": {
+        "id": 1049,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 9,
+      "response": {
+        "id": 1050,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 10,
+      "response": {
+        "id": 1051,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 10,
+      "response": {
+        "id": 1052,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 10,
+      "response": {
+        "id": 1053,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 10,
+      "response": {
+        "id": 1054,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 10,
+      "response": {
+        "id": 1055,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 11,
+      "response": {
+        "id": 1056,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 11,
+      "response": {
+        "id": 1057,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 11,
+      "response": {
+        "id": 1058,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_z REGISTER=IFCNT\nM400"
+    },
+    {
+      "loop": 11,
+      "response": {
+        "id": 1059,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_x REGISTER=GCONF\nM400"
+    },
+    {
+      "loop": 11,
+      "response": {
+        "id": 1060,
+        "result": {}
+      },
+      "script": "DUMP_TMC STEPPER=stepper_y REGISTER=GCONF\nM400"
+    }
+  ]
+}

@@ -6,10 +6,11 @@ package chelper
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo LDFLAGS: -lm
+#cgo LDFLAGS: -L${SRCDIR} -Wl,-rpath,'$ORIGIN' -lc_helper -lm
 #include "pyhelper.h"
 #include "serialqueue.h"
 #include "stepcompress.h"
+#include "steppersync.h"
 #include "itersolve.h"
 #include "trapq.h"
 #include <stdlib.h>
@@ -63,8 +64,8 @@ struct stepper_kinematics *corexy_stepper_alloc(char type);
 import "C"
 import (
 	"fmt"
-	"io/ioutil"
 	"goklipper/common/utils/file"
+	"io/ioutil"
 	"log"
 	"math"
 	"os/exec"
@@ -299,15 +300,15 @@ func Trdispatch_mcu_setup(tdm interface{}, last_status_clock uint64,
 		C.ulong(min_extend_ticks))
 }
 func Stepcompress_alloc(oid uint32) *C.struct_stepcompress {
-	return C.stepcompress_alloc(C.uint(oid))
+	return C.stepcompress_alloc_compat(C.uint(oid))
 }
 func Stepcompress_free(p interface{}) {
 	if p != nil {
 		C.stepcompress_free(p.(*C.struct_stepcompress))
 	}
 }
-func Stepcompress_fill(sc interface{}, max_error uint32, queue_step_msgtag int32, set_next_step_dir_msgtag int32) {
-	C.stepcompress_fill(sc.(*C.struct_stepcompress), C.uint(max_error), C.int(queue_step_msgtag), C.int(set_next_step_dir_msgtag))
+func Stepcompress_fill(sc interface{}, oid uint32, max_error uint32, queue_step_msgtag int32, set_next_step_dir_msgtag int32) {
+	C.stepcompress_fill(sc.(*C.struct_stepcompress), C.uint(oid), C.uint(max_error), C.int(queue_step_msgtag), C.int(set_next_step_dir_msgtag))
 }
 func Stepcompress_set_invert_sdir(sc interface{}, invert_sdir uint32) {
 	C.stepcompress_set_invert_sdir(sc.(*C.struct_stepcompress), C.uint(invert_sdir))

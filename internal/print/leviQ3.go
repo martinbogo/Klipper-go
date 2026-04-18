@@ -281,12 +281,72 @@ type NullStatus struct{}
 func (NullStatus) Infof(string, ...any)  {}
 func (NullStatus) Errorf(string, ...any) {}
 
+type FuncStatusSink struct {
+	InfofFunc  func(format string, args ...any)
+	ErrorfFunc func(format string, args ...any)
+}
+
+func (s FuncStatusSink) Infof(format string, args ...any) {
+	if s.InfofFunc != nil {
+		s.InfofFunc(format, args...)
+	}
+}
+
+func (s FuncStatusSink) Errorf(format string, args ...any) {
+	if s.ErrorfFunc != nil {
+		s.ErrorfFunc(format, args...)
+	}
+}
+
 type ConfigSource interface {
 	Float64(key string, fallback float64) float64
 	Int(key string, fallback int) int
 	Bool(key string, fallback bool) bool
 	Float64Slice(key string, fallback []float64) []float64
 	String(key string, fallback string) string
+}
+
+type FuncConfigSource struct {
+	Float64Func      func(key string, fallback float64) float64
+	IntFunc          func(key string, fallback int) int
+	BoolFunc         func(key string, fallback bool) bool
+	Float64SliceFunc func(key string, fallback []float64) []float64
+	StringFunc       func(key string, fallback string) string
+}
+
+func (s FuncConfigSource) Float64(key string, fallback float64) float64 {
+	if s.Float64Func != nil {
+		return s.Float64Func(key, fallback)
+	}
+	return fallback
+}
+
+func (s FuncConfigSource) Int(key string, fallback int) int {
+	if s.IntFunc != nil {
+		return s.IntFunc(key, fallback)
+	}
+	return fallback
+}
+
+func (s FuncConfigSource) Bool(key string, fallback bool) bool {
+	if s.BoolFunc != nil {
+		return s.BoolFunc(key, fallback)
+	}
+	return fallback
+}
+
+func (s FuncConfigSource) Float64Slice(key string, fallback []float64) []float64 {
+	if s.Float64SliceFunc != nil {
+		return s.Float64SliceFunc(key, fallback)
+	}
+	return append([]float64(nil), fallback...)
+}
+
+func (s FuncConfigSource) String(key string, fallback string) string {
+	if s.StringFunc != nil {
+		return s.StringFunc(key, fallback)
+	}
+	return fallback
 }
 
 type MotionController interface {
@@ -618,12 +678,76 @@ func (h *LeviQ3Helper) RestorePersistentStateFromJSON(payload []byte) error {
 	return nil
 }
 
+func (h *LeviQ3Helper) RestorePersistentStateValue(raw any) error {
+	if h == nil {
+		return errors.New("nil LeviQ3Helper")
+	}
+	if raw == nil {
+		return nil
+	}
+	switch typed := raw.(type) {
+	case string:
+		payload := []byte(strings.TrimSpace(typed))
+		if len(payload) == 0 {
+			return nil
+		}
+		return h.RestorePersistentStateFromJSON(payload)
+	case []byte:
+		if len(typed) == 0 {
+			return nil
+		}
+		return h.RestorePersistentStateFromJSON(typed)
+	}
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return h.RestorePersistentStateFromJSON(payload)
+}
+
+func (h *LeviQ3Helper) RestorePersistentStateVariable(variables map[string]interface{}, variable string) error {
+	if h == nil {
+		return errors.New("nil LeviQ3Helper")
+	}
+	variable = strings.TrimSpace(variable)
+	if variable == "" {
+		return errors.New("empty save-variable name")
+	}
+	if len(variables) == 0 {
+		return nil
+	}
+	return h.RestorePersistentStateValue(variables[variable])
+}
+
 func (h *LeviQ3Helper) PersistentStateJSON() ([]byte, error) {
 	if h == nil {
 		return nil, errors.New("nil LeviQ3Helper")
 	}
 	persisted := NewLeviQ3PersistedStateRecord(h.CurrentZOffset(), h.PersistentState())
 	return json.Marshal(persisted)
+}
+
+func (h *LeviQ3Helper) PersistentStateSaveVariableValue() (string, error) {
+	payload, err := h.PersistentStateJSON()
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
+}
+
+func (h *LeviQ3Helper) PersistentStateSaveVariableCommand(variable string) (string, error) {
+	if h == nil {
+		return "", errors.New("nil LeviQ3Helper")
+	}
+	variable = strings.TrimSpace(variable)
+	if variable == "" {
+		return "", errors.New("empty save-variable name")
+	}
+	value, err := h.PersistentStateSaveVariableValue()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("SAVE_VARIABLE VARIABLE=%s VALUE=%s", variable, value), nil
 }
 
 func (h *LeviQ3Helper) MeshBuildParams() map[string]interface{} {

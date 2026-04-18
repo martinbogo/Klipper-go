@@ -17,17 +17,17 @@ const (
 )
 
 type ClockSync struct {
-	reactor         Reactor
-	serial          *SerialReader
-	get_clock_timer Timer
-	get_clock_cmd   []int
-	cmd_queue       interface{}
-	queries_pending int
-	mcu_freq        float64
-	last_clock      int64
-	clock_est       [3]float64
-	min_half_rtt    float64
-	min_rtt_time    float64
+	reactor              Reactor
+	serial               *SerialReader
+	get_clock_timer      Timer
+	get_clock_cmd        []int
+	cmd_queue            interface{}
+	queries_pending      int
+	mcu_freq             float64
+	last_clock           int64
+	clock_est            [3]float64
+	min_half_rtt         float64
+	min_rtt_time         float64
 	time_avg             float64
 	time_variance        float64
 	clock_avg            float64
@@ -58,10 +58,21 @@ func NewClockSync(reactor Reactor) *ClockSync {
 	return &self
 }
 
+func requireClockSyncResponse(serial *SerialReader, msg string, response string) map[string]interface{} {
+	params, err := serial.Send_with_response(msg, response)
+	if err != nil {
+		panic(fmt.Errorf("clock sync %s failed: %w", response, err))
+	}
+	if params == nil {
+		panic(fmt.Errorf("clock sync %s failed: nil response", response))
+	}
+	return params
+}
+
 func (self *ClockSync) Connect(serial *SerialReader) {
 	self.serial = serial
 	self.mcu_freq = serial.Msgparser.Get_constant_float("CLOCK_FREQ", nil)
-	params, _ := serial.Send_with_response("get_uptime", "uptime")
+	params := requireClockSyncResponse(serial, "get_uptime", "uptime")
 	self.last_clock = (params["high"].(int64) << 32) | params["clock"].(int64)
 	self.clock_avg = float64(self.last_clock)
 	self.time_avg = chelper.CdoubleTofloat64(params["#sent_time"])
@@ -70,7 +81,7 @@ func (self *ClockSync) Connect(serial *SerialReader) {
 	for i := 0; i < 8; i++ {
 		self.reactor.Pause(self.reactor.Monotonic() + 0.050)
 		self.last_prediction_time = -9999.
-		params, _ = serial.Send_with_response("get_clock", "clock")
+		params = requireClockSyncResponse(serial, "get_clock", "clock")
 		self._handle_clock(params)
 	}
 	self.get_clock_cmd = serial.Get_msgparser().Create_command("get_clock")
@@ -207,17 +218,17 @@ func (self *ClockSync) Calibrate_clock(print_time float64, eventtime float64) []
 }
 
 type SecondarySync struct {
-	reactor         Reactor
-	serial          *SerialReader
-	get_clock_timer Timer
-	get_clock_cmd   []int
-	cmd_queue       interface{}
-	queries_pending int
-	mcu_freq        float64
-	last_clock      int64
-	clock_est       [3]float64
-	min_half_rtt    float64
-	min_rtt_time    float64
+	reactor              Reactor
+	serial               *SerialReader
+	get_clock_timer      Timer
+	get_clock_cmd        []int
+	cmd_queue            interface{}
+	queries_pending      int
+	mcu_freq             float64
+	last_clock           int64
+	clock_est            [3]float64
+	min_half_rtt         float64
+	min_rtt_time         float64
 	time_avg             float64
 	time_variance        float64
 	clock_avg            float64
@@ -257,7 +268,7 @@ func NewSecondarySync(reactor Reactor, main_sync *ClockSync) ClockSyncAble {
 func (self *SecondarySync) Connect(serial *SerialReader) {
 	self.serial = serial
 	self.mcu_freq = serial.Msgparser.Get_constant_float("CLOCK_FREQ", nil)
-	params, _ := serial.Send_with_response("get_uptime", "uptime")
+	params := requireClockSyncResponse(serial, "get_uptime", "uptime")
 	self.last_clock = (params["high"].(int64) << 32) | params["clock"].(int64)
 	self.clock_avg = float64(self.last_clock)
 	self.time_avg = chelper.CdoubleTofloat64(params["#sent_time"])
@@ -266,7 +277,7 @@ func (self *SecondarySync) Connect(serial *SerialReader) {
 	for i := 0; i < 8; i++ {
 		self.reactor.Pause(self.reactor.Monotonic() + 0.050)
 		self.last_prediction_time = -9999.
-		params, _ = serial.Send_with_response("get_clock", "clock")
+		params = requireClockSyncResponse(serial, "get_clock", "clock")
 		self._handle_clock(params)
 	}
 	self.get_clock_cmd = serial.Get_msgparser().Create_command("get_clock")

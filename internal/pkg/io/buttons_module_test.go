@@ -13,7 +13,11 @@ type fakeButtonsCommand struct {
 	sends [][3]interface{}
 }
 
-func (self *fakeButtonsCommand) Send(args []int64, minclock int64, reqclock int64) {
+func (self *fakeButtonsCommand) Send(data interface{}, minclock int64, reqclock int64) {
+	args, ok := data.([]int64)
+	if !ok {
+		panic(fmt.Sprintf("unexpected command payload type %T", data))
+	}
 	copyArgs := append([]int64{}, args...)
 	self.sends = append(self.sends, [3]interface{}{copyArgs, minclock, reqclock})
 }
@@ -39,18 +43,18 @@ func (self *fakeButtonsReactor) RegisterAsyncCallback(callback func(float64)) {
 }
 
 type fakeButtonsMCU struct {
-	nextOID           int
-	callbacks         []func()
-	configCmds        []string
-	querySlot         int64
-	secondsToClockIn  []float64
-	responseCallback  func(map[string]interface{}) error
-	responseMessage   string
-	responseOID       interface{}
-	lookupFormats     []string
-	lookupQueues      []interface{}
-	commandQueue      interface{}
-	commands          map[string]*fakeButtonsCommand
+	nextOID          int
+	callbacks        []func()
+	configCmds       []string
+	querySlot        int64
+	secondsToClockIn []float64
+	responseCallback func(map[string]interface{}) error
+	responseMessage  string
+	responseOID      interface{}
+	lookupFormats    []string
+	lookupQueues     []interface{}
+	commandQueue     interface{}
+	commands         map[string]*fakeButtonsCommand
 }
 
 func (self *fakeButtonsMCU) CreateOID() int {
@@ -127,9 +131,9 @@ func (self *fakeButtonsADC) GetLastValue() [2]float64 {
 }
 
 type fakeButtonsPinRegistry struct {
-	lookupCalls []string
-	lookup      map[string]map[string]interface{}
-	adcPins     map[string]*fakeButtonsADC
+	lookupCalls  []string
+	lookup       map[string]map[string]interface{}
+	adcPins      map[string]*fakeButtonsADC
 	adcSetupPins []string
 }
 
@@ -185,20 +189,21 @@ func (self *fakeButtonsPrinter) LookupObject(name string, defaultValue interface
 	return defaultValue
 }
 
-func (self *fakeButtonsPrinter) RegisterEventHandler(event string, callback func([]interface{}) error) {}
-func (self *fakeButtonsPrinter) SendEvent(event string, params []interface{})                    {}
-func (self *fakeButtonsPrinter) CurrentExtruderName() string                                      { return "extruder" }
-func (self *fakeButtonsPrinter) AddObject(name string, obj interface{}) error                     { return nil }
-func (self *fakeButtonsPrinter) LookupObjects(module string) []interface{}                        { return nil }
-func (self *fakeButtonsPrinter) HasStartArg(name string) bool                                     { return false }
-func (self *fakeButtonsPrinter) LookupHeater(name string) printerpkg.HeaterRuntime                { return nil }
-func (self *fakeButtonsPrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry         { return nil }
-func (self *fakeButtonsPrinter) InvokeShutdown(msg string)                                        {}
-func (self *fakeButtonsPrinter) IsShutdown() bool                                                 { return false }
-func (self *fakeButtonsPrinter) StepperEnable() printerpkg.StepperEnableRuntime                   { return nil }
-func (self *fakeButtonsPrinter) GCode() printerpkg.GCodeRuntime                                   { return nil }
-func (self *fakeButtonsPrinter) GCodeMove() printerpkg.MoveTransformController                    { return nil }
-func (self *fakeButtonsPrinter) Webhooks() printerpkg.WebhookRegistry                             { return nil }
+func (self *fakeButtonsPrinter) RegisterEventHandler(event string, callback func([]interface{}) error) {
+}
+func (self *fakeButtonsPrinter) SendEvent(event string, params []interface{})             {}
+func (self *fakeButtonsPrinter) CurrentExtruderName() string                              { return "extruder" }
+func (self *fakeButtonsPrinter) AddObject(name string, obj interface{}) error             { return nil }
+func (self *fakeButtonsPrinter) LookupObjects(module string) []interface{}                { return nil }
+func (self *fakeButtonsPrinter) HasStartArg(name string) bool                             { return false }
+func (self *fakeButtonsPrinter) LookupHeater(name string) printerpkg.HeaterRuntime        { return nil }
+func (self *fakeButtonsPrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry { return nil }
+func (self *fakeButtonsPrinter) InvokeShutdown(msg string)                                {}
+func (self *fakeButtonsPrinter) IsShutdown() bool                                         { return false }
+func (self *fakeButtonsPrinter) StepperEnable() printerpkg.StepperEnableRuntime           { return nil }
+func (self *fakeButtonsPrinter) GCode() printerpkg.GCodeRuntime                           { return nil }
+func (self *fakeButtonsPrinter) GCodeMove() printerpkg.MoveTransformController            { return nil }
+func (self *fakeButtonsPrinter) Webhooks() printerpkg.WebhookRegistry                     { return nil }
 
 func (self *fakeButtonsPrinter) LookupMCU(name string) printerpkg.MCURuntime {
 	if value, ok := self.mcus[name]; ok {

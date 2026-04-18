@@ -15,13 +15,18 @@ type VirtualPinHelperCore struct {
 	fields       *FieldHelper
 	diagPin      interface{}
 	diagPinField interface{}
-	enPWM        bool
-	pwmthrs      int64
-	coolthrs     int64
+	dirtyRegs    map[string]int64
+	dirtyOrder   []string
+	prevFields   map[string]int64
+	prevOrder    []string
 }
 
 func NewVirtualPinHelperCore(config VirtualPinConfig, mcuTMC FieldCarrier) *VirtualPinHelperCore {
-	self := &VirtualPinHelperCore{fields: mcuTMC.Get_fields()}
+	self := &VirtualPinHelperCore{
+		fields:     mcuTMC.Get_fields(),
+		dirtyRegs:  map[string]int64{},
+		prevFields: map[string]int64{},
+	}
 	if value.IsNotNone(self.fields.Lookup_register("diag0_stall", nil)) {
 		if value.IsNotNone(config.Get("diag0_pin", value.None, true)) {
 			self.diagPin = config.Get("diag0_pin", value.None, true)
@@ -46,60 +51,81 @@ func (self *VirtualPinHelperCore) DiagPin() interface{} {
 	return self.diagPin
 }
 
-func (self *VirtualPinHelperCore) BeginHoming(mcuTMC RegisterAccess, tcoolthrsIfZero int64) error {
-	self.pwmthrs = self.fields.Get_field("tpwmthrs", value.None, nil)
-	self.coolthrs = self.fields.Get_field("tcoolthrs", value.None, nil)
+func (self *VirtualPinHelperCore) queueField(fieldName string, fieldValue interface{}) {
+	regName := self.fields.Lookup_register(fieldName, value.None)
+	if value.IsNone(regName) {
+		return
+	}
+	if _, ok := self.prevFields[fieldName]; !ok {
+		self.prevFields[fieldName] = self.fields.Get_field(fieldName, value.None, nil)
+		self.prevOrder = append(self.prevOrder, fieldName)
+	}
+	resolvedRegName := cast.ToString(regName)
+	regValue := self.fields.Set_field(fieldName, fieldValue, value.None, nil)
+	if _, ok := self.dirtyRegs[resolvedRegName]; !ok {
+		self.dirtyOrder = append(self.dirtyOrder, resolvedRegName)
+	}
+	self.dirtyRegs[resolvedRegName] = regValue
+}
 
-	reg := self.fields.Lookup_register("en_pwm_mode", value.None)
-	var val int64
-	if value.IsNone(reg) {
-		self.enPWM = self.fields.Get_field("en_spreadcycle", value.None, nil) == 0
-		tpVal := self.fields.Set_field("tpwmthrs", 0, value.None, nil)
-		if err := mcuTMC.Set_register("TPWMTHRS", tpVal, nil); err != nil {
-			return err
-		}
-		val = self.fields.Set_field("en_spreadcycle", 0, value.None, nil)
-	} else {
-		self.enPWM = self.fields.Get_field("en_pwm_mode", value.None, nil) == 0
-		self.fields.Set_field("en_pwm_mode", 0, value.None, nil)
-		val = self.fields.Set_field(cast.ToString(self.diagPinField), 1, value.None, nil)
-	}
-	if err := mcuTMC.Set_register("GCONF", val, nil); err != nil {
-		return err
-	}
-	if self.coolthrs == 0 {
-		tcVal := self.fields.Set_field("tcoolthrs", tcoolthrsIfZero, value.None, nil)
-		if err := mcuTMC.Set_register("TCOOLTHRS", tcVal, nil); err != nil {
+func (self *VirtualPinHelperCore) sendQueuedFields(mcuTMC RegisterAccess, printTime *float64) error {
+	for _, regName := range self.dirtyOrder {
+		if err := mcuTMC.Set_register(regName, self.dirtyRegs[regName], printTime); err != nil {
 			return err
 		}
 	}
+	self.dirtyRegs = map[string]int64{}
+	self.dirtyOrder = nil
 	return nil
 }
 
+func (self *VirtualPinHelperCore) BeginHoming(mcuTMC RegisterAccess, tcoolthrsIfZero int64) error {
+	sg4Thrs := int64(0)
+	if value.IsNotNone(self.fields.Lookup_register("sg4_thrs", value.None)) {
+		sg4Thrs = self.fields.Get_field("sg4_thrs", value.None, nil)
+	}
+
+	reg := self.fields.Lookup_register("en_pwm_mode", value.None)
+	if value.IsNone(reg) {
+		self.queueField("tpwmthrs", 0)
+		self.queueField("en_spreadcycle", 0)
+	} else if sg4Thrs != 0 {
+		self.queueField("en_pwm_mode", 1)
+		self.queueField("tpwmthrs", 0)
+		if value.IsNotNone(self.diagPinField) {
+			self.queueField(cast.ToString(self.diagPinField), 1)
+		}
+	} else {
+		self.queueField("en_pwm_mode", 0)
+		if value.IsNotNone(self.diagPinField) {
+			self.queueField(cast.ToString(self.diagPinField), 1)
+		}
+	}
+	if self.fields.Get_field("tcoolthrs", value.None, nil) == 0 {
+		self.queueField("tcoolthrs", tcoolthrsIfZero)
+	}
+	if value.IsNotNone(self.fields.Lookup_register("thigh", value.None)) {
+		self.queueField("thigh", 0)
+	}
+	return self.sendQueuedFields(mcuTMC, nil)
+}
+
 func (self *VirtualPinHelperCore) BeginMoveHoming(mcuTMC RegisterAccess) error {
-	tcVal := self.fields.Set_field("tcoolthrs", 0, value.None, nil)
-	if err := mcuTMC.Set_register("TCOOLTHRS", tcVal, nil); err != nil {
+	self.queueField("tcoolthrs", 0)
+	if err := self.sendQueuedFields(mcuTMC, nil); err != nil {
 		return err
 	}
 	return self.BeginHoming(mcuTMC, 500)
 }
 
 func (self *VirtualPinHelperCore) EndHoming(mcuTMC RegisterAccess, printTime *float64) error {
-	var val int64
-	reg := self.fields.Lookup_register("en_pwm_mode", value.None)
-	if value.IsNone(reg) {
-		tpVal := self.fields.Set_field("tpwmthrs", self.pwmthrs, value.None, nil)
-		if err := mcuTMC.Set_register("TPWMTHRS", tpVal, printTime); err != nil {
-			return err
-		}
-		val = self.fields.Set_field("en_spreadcycle", self.enPWM, value.None, nil)
-	} else {
-		self.fields.Set_field("en_pwm_mode", self.enPWM, value.None, nil)
-		val = self.fields.Set_field(cast.ToString(self.diagPinField), 0, value.None, nil)
+	for _, fieldName := range self.prevOrder {
+		self.queueField(fieldName, self.prevFields[fieldName])
 	}
-	if err := mcuTMC.Set_register("GCONF", val, printTime); err != nil {
+	if err := self.sendQueuedFields(mcuTMC, printTime); err != nil {
 		return err
 	}
-	tcVal := self.fields.Set_field("tcoolthrs", 0, value.None, nil)
-	return mcuTMC.Set_register("TCOOLTHRS", tcVal, nil)
+	self.prevFields = map[string]int64{}
+	self.prevOrder = nil
+	return nil
 }

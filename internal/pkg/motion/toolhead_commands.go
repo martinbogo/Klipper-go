@@ -34,26 +34,37 @@ func HandleToolheadM400Command(context ToolheadCommandContext) error {
 func HandleToolheadSetVelocityLimitCommand(context ToolheadCommandContext, command ToolheadCommand) (ToolheadVelocityLimitResult, bool) {
 	above := 0.0
 	minval := 0.0
-	maxVelocity := command.Get_float("VELOCITY", nil, nil, nil, &above, nil)
-	maxAccel := command.Get_float("ACCEL", nil, nil, nil, &above, nil)
-	squareCornerVelocity := command.Get_float("SQUARE_CORNER_VELOCITY", nil, &minval, nil, nil, nil)
-	requestedAccelToDecel := command.Get_float("ACCEL_TO_DECEL", nil, nil, nil, &above, nil)
+	below := 1.0
+	maxVelocity := command.Get_float("VELOCITY", math.NaN(), nil, nil, &above, nil)
+	maxAccel := command.Get_float("ACCEL", math.NaN(), nil, nil, &above, nil)
+	squareCornerVelocity := command.Get_float("SQUARE_CORNER_VELOCITY", math.NaN(), &minval, nil, nil, nil)
+	requestedAccelToDecel := command.Get_float("ACCEL_TO_DECEL", math.NaN(), nil, nil, &above, nil)
+	minimumCruiseRatio := command.Get_float("MINIMUM_CRUISE_RATIO", math.NaN(), &minval, nil, nil, &below)
 	toOptional := func(value float64) *float64 {
-		if value == 0.0 {
+		if math.IsNaN(value) {
 			return nil
 		}
 		valueCopy := value
 		return &valueCopy
 	}
+	effectiveMaxAccel := context.VelocitySettings().MaxAccel
+	if !math.IsNaN(maxAccel) {
+		effectiveMaxAccel = maxAccel
+	}
+	requestedAccelToDecelOptional := toOptional(requestedAccelToDecel)
+	if !math.IsNaN(minimumCruiseRatio) {
+		requestedFromMCR := effectiveMaxAccel * (1.0 - minimumCruiseRatio)
+		requestedAccelToDecelOptional = &requestedFromMCR
+	}
 	result := ApplyToolheadVelocityLimitUpdate(context.VelocitySettings(), ToolheadVelocityLimitUpdate{
 		MaxVelocity:           toOptional(maxVelocity),
 		MaxAccel:              toOptional(maxAccel),
-		RequestedAccelToDecel: toOptional(requestedAccelToDecel),
+		RequestedAccelToDecel: requestedAccelToDecelOptional,
 		SquareCornerVelocity:  toOptional(squareCornerVelocity),
 	})
 	context.ApplyVelocityLimitResult(result)
 	context.SetRolloverInfo(fmt.Sprintf("toolhead: %s", result.Summary))
-	queryOnly := maxVelocity == 0.0 && maxAccel == 0.0 && squareCornerVelocity == 0.0 && requestedAccelToDecel == 0.0
+	queryOnly := math.IsNaN(maxVelocity) && math.IsNaN(maxAccel) && math.IsNaN(squareCornerVelocity) && math.IsNaN(requestedAccelToDecel) && math.IsNaN(minimumCruiseRatio)
 	return result, queryOnly
 }
 

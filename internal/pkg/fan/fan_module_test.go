@@ -257,6 +257,14 @@ func (self *fakeFanWebhookRequest) Float(name string, defaultValue float64) floa
 
 func (self *fakeFanWebhookRequest) Int(name string, defaultValue int) int { return defaultValue }
 
+func (self *fakeFanWebhookRequest) GetParams() map[string]interface{} {
+	m := make(map[string]interface{})
+	for k, v := range self.floats {
+		m[k] = v
+	}
+	return m
+}
+
 func assertApprox(t *testing.T, got float64, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > 1e-6 {

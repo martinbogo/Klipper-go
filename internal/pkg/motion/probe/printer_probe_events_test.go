@@ -14,7 +14,6 @@ type fakeProbeEventRuntime struct {
 	beginMCUCount         int
 	endMCUCount           int
 	events                []string
-	syncCount             int
 	callLog               []string
 }
 
@@ -55,11 +54,6 @@ func (self *fakeProbeEventRuntime) SendEvent(event string) {
 	self.callLog = append(self.callLog, "event:"+event)
 }
 
-func (self *fakeProbeEventRuntime) SyncCoreState() {
-	self.syncCount++
-	self.callLog = append(self.callLog, "sync")
-}
-
 func TestHandleHomingMoveBeginPreparesOnceForMatchingWrapper(t *testing.T) {
 	match := &struct{}{}
 	runtime := &fakeProbeEventRuntime{
@@ -72,8 +66,8 @@ func TestHandleHomingMoveBeginPreparesOnceForMatchingWrapper(t *testing.T) {
 	if got, want := runtime.prepareMoves, []interface{}{"move"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("prepareMoves = %v, want %v", got, want)
 	}
-	if runtime.beginMCUCount != 0 || runtime.endMCUCount != 0 || runtime.syncCount != 0 {
-		t.Fatalf("unexpected multi-probe activity: begin=%d end=%d sync=%d", runtime.beginMCUCount, runtime.endMCUCount, runtime.syncCount)
+	if runtime.beginMCUCount != 0 || runtime.endMCUCount != 0 {
+		t.Fatalf("unexpected multi-probe activity: begin=%d end=%d", runtime.beginMCUCount, runtime.endMCUCount)
 	}
 	if got, want := runtime.callLog, []string{"prepare"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("callLog = %v, want %v", got, want)
@@ -113,10 +107,7 @@ func TestHandleHomeRailsBeginStartsMultiProbeLifecycle(t *testing.T) {
 	if runtime.beginMCUCount != 1 {
 		t.Fatalf("beginMCUCount = %d, want 1", runtime.beginMCUCount)
 	}
-	if runtime.syncCount != 1 {
-		t.Fatalf("syncCount = %d, want 1", runtime.syncCount)
-	}
-	if got, want := runtime.callLog, []string{"event:homing:multi_probe_begin", "begin-mcu", "sync"}; !reflect.DeepEqual(got, want) {
+	if got, want := runtime.callLog, []string{"event:homing:multi_probe_begin", "begin-mcu"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("callLog = %v, want %v", got, want)
 	}
 }
@@ -138,10 +129,7 @@ func TestHandleHomeRailsEndEndsPendingMultiProbeBeforeEvent(t *testing.T) {
 	if runtime.endMCUCount != 1 {
 		t.Fatalf("endMCUCount = %d, want 1", runtime.endMCUCount)
 	}
-	if runtime.syncCount != 1 {
-		t.Fatalf("syncCount = %d, want 1", runtime.syncCount)
-	}
-	if got, want := runtime.callLog, []string{"sync", "end-mcu", "event:homing:multi_probe_end"}; !reflect.DeepEqual(got, want) {
+	if got, want := runtime.callLog, []string{"end-mcu", "event:homing:multi_probe_end"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("callLog = %v, want %v", got, want)
 	}
 }
@@ -155,9 +143,6 @@ func TestHandleCommandErrorAlwaysEmitsMultiProbeEndEvent(t *testing.T) {
 
 	if runtime.endMCUCount != 0 {
 		t.Fatalf("endMCUCount = %d, want 0", runtime.endMCUCount)
-	}
-	if runtime.syncCount != 0 {
-		t.Fatalf("syncCount = %d, want 0", runtime.syncCount)
 	}
 	if got, want := runtime.events, []string{"homing:multi_probe_end"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %v, want %v", got, want)

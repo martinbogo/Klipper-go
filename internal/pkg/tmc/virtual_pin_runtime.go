@@ -25,8 +25,7 @@ func (self *VirtualPinRuntime) BeginMoveHoming() error {
 }
 
 func (self *VirtualPinRuntime) EndMoveHoming() error {
-	printTime := 0.0
-	return self.core.EndHoming(self.mcuTMC, &printTime)
+	return self.core.EndHoming(self.mcuTMC, nil)
 }
 
 func (self *VirtualPinRuntime) BeginHoming() error {
@@ -41,8 +40,6 @@ type VirtualPinEventRuntime interface {
 	MatchesHomingMoveEndstop(endstop interface{}) bool
 	BeginMoveHoming() error
 	EndMoveHoming() error
-	BeginHoming() error
-	EndHoming() error
 }
 
 func HandleVirtualPinHomingMoveBegin(runtime VirtualPinEventRuntime, endstops []interface{}) error {
@@ -57,14 +54,6 @@ func HandleVirtualPinHomingMoveEnd(runtime VirtualPinEventRuntime, endstops []in
 		return runtime.EndMoveHoming()
 	}
 	return nil
-}
-
-func HandleVirtualPinHomingBegin(runtime VirtualPinEventRuntime) error {
-	return runtime.BeginHoming()
-}
-
-func HandleVirtualPinHomingEnd(runtime VirtualPinEventRuntime) error {
-	return runtime.EndHoming()
 }
 
 type virtualPinEndstopMatcher func(interface{}) bool

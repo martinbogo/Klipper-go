@@ -9,9 +9,9 @@ type ActiveStepper interface {
 }
 
 type StepperEnablePin struct {
-	digitalOut   DigitalOut
-	enableCount  int
-	isDedicated  bool
+	digitalOut  DigitalOut
+	enableCount int
+	isDedicated bool
 }
 
 func NewStepperEnablePin(digitalOut DigitalOut, enableCount int) *StepperEnablePin {
@@ -53,10 +53,10 @@ func (self *StepperEnablePin) IsDedicated() bool {
 }
 
 type EnableTracking struct {
-	stepper    ActiveStepper
-	enable     *StepperEnablePin
-	callbacks  []func(float64, bool)
-	isEnabled  bool
+	stepper   ActiveStepper
+	enable    *StepperEnablePin
+	callbacks []func(float64, bool)
+	isEnabled bool
 }
 
 func NewEnableTracking(stepper ActiveStepper, enable *StepperEnablePin) *EnableTracking {
@@ -79,11 +79,11 @@ func (self *EnableTracking) Register_state_callback(callback func(float64, bool)
 
 func (self *EnableTracking) MotorEnable(printTime float64) {
 	if !self.isEnabled {
+		self.enable.SetEnable(printTime)
+		self.isEnabled = true
 		for _, cb := range self.callbacks {
 			cb(printTime, true)
 		}
-		self.enable.SetEnable(printTime)
-		self.isEnabled = true
 	}
 }
 

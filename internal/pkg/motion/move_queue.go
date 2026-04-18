@@ -35,6 +35,9 @@ type Move struct {
 	Max_start_v2       float64
 	Max_cruise_v2      float64
 	Delta_v2           float64
+	Next_junction_v2   float64
+	Max_mcr_start_v2   float64
+	Mcr_delta_v2       float64
 	Max_smoothed_v2    float64
 	Smooth_delta_v2    float64
 	Start_v            float64
@@ -89,8 +92,11 @@ func NewMove(config MoveConfig, start_pos, end_pos []float64, speed float64) *Mo
 	self.Max_start_v2 = 0.
 	self.Max_cruise_v2 = velocity * velocity
 	self.Delta_v2 = 2. * self.Move_d * self.Accel
+	self.Next_junction_v2 = 999999999.9
+	self.Max_mcr_start_v2 = 0.
+	self.Mcr_delta_v2 = 2. * self.Move_d * config.Max_accel_to_decel
 	self.Max_smoothed_v2 = 0.
-	self.Smooth_delta_v2 = 2. * self.Move_d * config.Max_accel_to_decel
+	self.Smooth_delta_v2 = self.Mcr_delta_v2
 	return self
 }
 
@@ -102,13 +108,42 @@ func (self *Move) Limit_speed(speed float64, accel float64) {
 	}
 	self.Accel = math.Min(self.Accel, accel)
 	self.Delta_v2 = 2.0 * self.Move_d * self.Accel
-	self.Smooth_delta_v2 = math.Min(self.Smooth_delta_v2, self.Delta_v2)
+	self.Mcr_delta_v2 = math.Min(self.Mcr_delta_v2, self.Delta_v2)
+	self.Smooth_delta_v2 = self.Mcr_delta_v2
+}
+
+func (self *Move) Limit_next_junction_speed(speed float64) {
+	self.Next_junction_v2 = math.Min(self.Next_junction_v2, speed*speed)
+}
+
+func (self *Move) LimitNextJunctionSpeed(speed float64) {
+	self.Limit_next_junction_speed(speed)
 }
 
 func (self *Move) Move_error(msg string) error {
 	ep := self.End_pos
 	m := fmt.Sprintf("%s: %.3f %.3f %.3f [%.3f]", msg, ep[0], ep[1], ep[2], ep[3])
 	return errors.New(m)
+}
+
+func (self *Move) EndPos() []float64 {
+	return self.End_pos
+}
+
+func (self *Move) AxesD() []float64 {
+	return self.Axes_d
+}
+
+func (self *Move) MoveD() float64 {
+	return self.Move_d
+}
+
+func (self *Move) LimitSpeed(speed float64, accel float64) {
+	self.Limit_speed(speed, accel)
+}
+
+func (self *Move) MoveError(msg string) error {
+	return self.Move_error(msg)
 }
 
 func customMin(values ...float64) float64 {
@@ -132,7 +167,9 @@ func (self *Move) Calc_junction(prev_move *Move, extruder MoveJunctionCalculator
 	if extruder != nil {
 		extruder_v2 = extruder.Calc_junction(prev_move, self)
 	}
-	max_start_v2 := customMin(extruder_v2, self.Max_cruise_v2, prev_move.Max_cruise_v2, prev_move.Max_start_v2+prev_move.Delta_v2)
+	max_start_v2 := customMin(extruder_v2, self.Max_cruise_v2,
+		prev_move.Max_cruise_v2, prev_move.Next_junction_v2,
+		prev_move.Max_start_v2+prev_move.Delta_v2)
 	axes_r := self.Axes_r
 	prev_axes_r := prev_move.Axes_r
 	junction_cos_theta := -(axes_r[0]*prev_axes_r[0] + axes_r[1]*prev_axes_r[1] + axes_r[2]*prev_axes_r[2])
@@ -150,7 +187,8 @@ func (self *Move) Calc_junction(prev_move *Move, extruder MoveJunctionCalculator
 			move_centripetal_v2, pmove_centripetal_v2)
 	}
 	self.Max_start_v2 = max_start_v2
-	self.Max_smoothed_v2 = math.Min(max_start_v2, prev_move.Max_smoothed_v2+prev_move.Smooth_delta_v2)
+	self.Max_mcr_start_v2 = math.Min(max_start_v2, prev_move.Max_mcr_start_v2+prev_move.Mcr_delta_v2)
+	self.Max_smoothed_v2 = self.Max_mcr_start_v2
 }
 
 func (self *Move) Set_junction(start_v2, cruise_v2, end_v2 float64) {
@@ -169,12 +207,14 @@ func (self *Move) Set_junction(start_v2, cruise_v2, end_v2 float64) {
 	self.Decel_t = decel_d / ((end_v + cruise_v) * 0.5)
 }
 
-const LOOKAHEAD_FLUSH_TIME = 0.250
+const LOOKAHEAD_FLUSH_TIME = 0.150
 
-type delayedNode struct {
-	Move  *Move
-	Ms_v2 float64
-	Me_v2 float64
+type junctionNode struct {
+	Move        *Move
+	StartV2     float64
+	CruiseV2    float64
+	HasCruiseV2 bool
+	NextStartV2 float64
 }
 
 type LookAheadQueue struct {
@@ -216,49 +256,54 @@ func (self *LookAheadQueue) Flush(lazy bool) {
 	update_flush_count := lazy
 	queue := self.queue
 	flush_count := len(queue)
-	delayed := []delayedNode{}
-	next_end_v2, next_smoothed_v2, peak_cruise_v2 := 0., 0., 0.
+	junctionInfo := make([]junctionNode, flush_count)
+	next_start_v2, next_mcr_start_v2, peak_cruise_v2 := 0., 0., 0.
+	pending_cruise_assign := 0
 	for i := flush_count - 1; i >= 0; i-- {
 		move := queue[i]
-		reachable_start_v2 := next_end_v2 + move.Delta_v2
-		reachable_smoothed_v2 := next_smoothed_v2 + move.Smooth_delta_v2
+		reachable_start_v2 := next_start_v2 + move.Delta_v2
 		start_v2 := math.Min(move.Max_start_v2, reachable_start_v2)
-		smoothed_v2 := math.Min(move.Max_smoothed_v2, reachable_smoothed_v2)
-		if smoothed_v2 < reachable_smoothed_v2 {
-			if smoothed_v2+move.Smooth_delta_v2 > next_smoothed_v2 || len(delayed) > 0 {
+		cruise_v2 := 0.0
+		hasCruiseV2 := false
+		pending_cruise_assign += 1
+		reachable_mcr_start_v2 := next_mcr_start_v2 + move.Mcr_delta_v2
+		mcr_start_v2 := math.Min(move.Max_mcr_start_v2, reachable_mcr_start_v2)
+		if mcr_start_v2 < reachable_mcr_start_v2 {
+			if mcr_start_v2+move.Mcr_delta_v2 > next_mcr_start_v2 || pending_cruise_assign > 1 {
 				if update_flush_count && peak_cruise_v2 != 0 {
-					flush_count = i
+					flush_count = i + pending_cruise_assign
 					update_flush_count = false
 				}
-				peak_cruise_v2 = math.Min(move.Max_cruise_v2, (smoothed_v2+reachable_smoothed_v2)*.5)
-				if len(delayed) > 0 {
-					if !update_flush_count && i < flush_count {
-						mc_v2 := peak_cruise_v2
-						for j := len(delayed) - 1; j >= 0; j-- {
-							m := delayed[j].Move
-							ms_v2 := delayed[j].Ms_v2
-							me_v2 := delayed[j].Me_v2
-							mc_v2 = math.Min(mc_v2, ms_v2)
-							m.Set_junction(math.Min(ms_v2, mc_v2), mc_v2, math.Min(me_v2, mc_v2))
-						}
-					}
-					delayed = nil
-				}
+				peak_cruise_v2 = (mcr_start_v2 + reachable_mcr_start_v2) * .5
 			}
-			if !update_flush_count && i < flush_count {
-				cruise_v2 := math.Min((start_v2+reachable_start_v2)*.5,
-					math.Min(move.Max_cruise_v2, peak_cruise_v2))
-				move.Set_junction(math.Min(start_v2, cruise_v2), cruise_v2,
-					math.Min(next_end_v2, cruise_v2))
-			}
-		} else {
-			delayed = append(delayed, delayedNode{move, start_v2, next_end_v2})
+			cruise_v2 = customMin((start_v2+reachable_start_v2)*.5,
+				move.Max_cruise_v2, peak_cruise_v2)
+			hasCruiseV2 = true
+			pending_cruise_assign = 0
 		}
-		next_end_v2 = start_v2
-		next_smoothed_v2 = smoothed_v2
+		junctionInfo[i] = junctionNode{
+			Move:        move,
+			StartV2:     start_v2,
+			CruiseV2:    cruise_v2,
+			HasCruiseV2: hasCruiseV2,
+			NextStartV2: next_start_v2,
+		}
+		next_start_v2 = start_v2
+		next_mcr_start_v2 = mcr_start_v2
 	}
 	if update_flush_count || flush_count <= 0 {
 		return
+	}
+	prev_cruise_v2 := 0.0
+	for i := 0; i < flush_count; i++ {
+		node := junctionInfo[i]
+		cruise_v2 := node.CruiseV2
+		if !node.HasCruiseV2 {
+			cruise_v2 = math.Min(prev_cruise_v2, node.StartV2)
+		}
+		node.Move.Set_junction(math.Min(node.StartV2, cruise_v2), cruise_v2,
+			math.Min(node.NextStartV2, cruise_v2))
+		prev_cruise_v2 = cruise_v2
 	}
 	self.processor.Process_moves(queue[:flush_count])
 	if flush_count < len(self.queue) && len(self.queue) > 0 {
@@ -268,14 +313,12 @@ func (self *LookAheadQueue) Flush(lazy bool) {
 	}
 }
 
-func (self *LookAheadQueue) Add_move(move *Move, extruder MoveJunctionCalculator) {
+func (self *LookAheadQueue) Add_move(move *Move, extruder MoveJunctionCalculator) bool {
 	self.queue = append(self.queue, move)
 	if len(self.queue) == 1 {
-		return
+		return false
 	}
 	move.Calc_junction(self.queue[len(self.queue)-2], extruder)
 	self.junction_flush -= move.Min_move_t
-	if self.junction_flush <= 0. {
-		self.Flush(true)
-	}
+	return self.junction_flush <= 0.
 }

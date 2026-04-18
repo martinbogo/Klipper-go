@@ -6,12 +6,8 @@ type fakeVirtualPinEventRuntime struct {
 	matches        map[interface{}]bool
 	beginMoveCalls int
 	endMoveCalls   int
-	beginCalls     int
-	endCalls       int
 	beginMoveErr   error
 	endMoveErr     error
-	beginErr       error
-	endErr         error
 }
 
 func (self *fakeVirtualPinEventRuntime) MatchesHomingMoveEndstop(endstop interface{}) bool {
@@ -26,16 +22,6 @@ func (self *fakeVirtualPinEventRuntime) BeginMoveHoming() error {
 func (self *fakeVirtualPinEventRuntime) EndMoveHoming() error {
 	self.endMoveCalls++
 	return self.endMoveErr
-}
-
-func (self *fakeVirtualPinEventRuntime) BeginHoming() error {
-	self.beginCalls++
-	return self.beginErr
-}
-
-func (self *fakeVirtualPinEventRuntime) EndHoming() error {
-	self.endCalls++
-	return self.endErr
 }
 
 func TestHandleVirtualPinHomingMoveBeginOnlyOnMatch(t *testing.T) {
@@ -73,18 +59,5 @@ func TestHandleVirtualPinHomingMoveEndOnlyOnMatch(t *testing.T) {
 	}
 	if runtime.endMoveCalls != 0 {
 		t.Fatalf("expected no end-move call on non-match, got %d", runtime.endMoveCalls)
-	}
-}
-
-func TestHandleVirtualPinHomingBeginAndEndDelegate(t *testing.T) {
-	runtime := &fakeVirtualPinEventRuntime{}
-	if err := HandleVirtualPinHomingBegin(runtime); err != nil {
-		t.Fatalf("HandleVirtualPinHomingBegin returned error: %v", err)
-	}
-	if err := HandleVirtualPinHomingEnd(runtime); err != nil {
-		t.Fatalf("HandleVirtualPinHomingEnd returned error: %v", err)
-	}
-	if runtime.beginCalls != 1 || runtime.endCalls != 1 {
-		t.Fatalf("expected begin/end delegation once each, got begin=%d end=%d", runtime.beginCalls, runtime.endCalls)
 	}
 }

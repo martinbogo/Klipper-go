@@ -72,6 +72,10 @@ func (self *LegacyExtruderRuntime) Get_trapq() interface{} {
 	return self.Trapq
 }
 
+func (self *LegacyExtruderRuntime) LegacyLastPosition() float64 {
+	return self.Last_position
+}
+
 func (self *LegacyExtruderRuntime) Stats(eventtime float64) (bool, string) {
 	if self.Heater_stats == nil {
 		return false, ""

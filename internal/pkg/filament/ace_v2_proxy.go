@@ -4,10 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-
-	ace_v2 "goklipper/internal/pkg/filament/ace_v2"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // V2ProtoHandler handles the serialization and parsing of ACE v2 protocol messages
@@ -80,113 +76,19 @@ func calcCRC16(data []byte) uint16 {
 	return crc
 }
 
-// Reconstructed API endpoints based on recovered symbols from `ace_v2_symbols.txt`
-
-func SerializeFeedOrRollback(isFeed bool, speed int) []byte {
-	length := int32(100) // Default length
-	if !isFeed {
-		length = -100 // Negative for rollback
-	}
-	req := &ace_v2.FeedOrRollbackRequest{
-		Length: length,
-		Speed:  uint32(speed),
-	}
-	b, _ := proto.Marshal(req)
-	return b
+// BuildACEV2RequestFrame is intentionally disabled in the default build.
+// ACE v1 devices use the JSON path, and importing/generated protobuf-based
+// ACE v2 support in the default filament package caused startup panics on
+// ARM static builds before hardware detection could decide between v1 and v2.
+func BuildACEV2RequestFrame(cmd string, req map[string]interface{}) ([]byte, error) {
+	_ = cmd
+	_ = req
+	return nil, errors.New("ace v2 support is disabled in the default build")
 }
 
-func SerializeUpdateSpeed(speed int) []byte {
-	req := &ace_v2.SetFanRequest{
-		Speed: uint32(speed),
-	}
-	b, _ := proto.Marshal(req)
-	return b
-}
-
-func SerializeDrying(enable bool, time int) []byte {
-	temp := uint32(0)
-	if enable {
-		temp = 50 // Default drying temp
-	}
-	req := &ace_v2.DryingRequest{
-		Temperature:   temp,
-		DurationHours: uint32(time),
-	}
-	b, _ := proto.Marshal(req)
-	return b
-}
-
-func SerializeSetRfidEnable(enable bool) []byte {
-	req := &ace_v2.SetRfidEnableRequest{
-		Enable: enable,
-	}
-	b, _ := proto.Marshal(req)
-	return b
-}
-
-func SerializeSetFeedCheck(enable bool) []byte {
-	// Reuse SetRfidEnableRequest for FeedCheck mock
-	req := &ace_v2.SetRfidEnableRequest{
-		Enable: enable,
-	}
-	b, _ := proto.Marshal(req)
-	return b
-}
-
-func SerializeAssignDeviceId() []byte {
-	return []byte{} // Empty payload
-}
-
-func SerializeSetFan(speed int) []byte {
-	req := &ace_v2.SetFanRequest{
-		Speed: uint32(speed),
-	}
-	b, _ := proto.Marshal(req)
-	return b
-}
-
-type KeyStateResponse struct {
-	State int `json:"state"`
-}
-
-func ParseKeyStateResponse(data []byte) (*KeyStateResponse, error) {
-	// Mock success with a struct instead of error interface
-	return &KeyStateResponse{State: 0}, nil
-}
-
-type InfoResponse struct {
-	Info string `json:"info"`
-}
-
-func ParseInfoResponse(data []byte) (*InfoResponse, error) {
-	return &InfoResponse{Info: "ready"}, nil
-}
-
-func ParseStatusResponse(data []byte) (*ace_v2.StatusResponse, error) {
-	resp := &ace_v2.StatusResponse{}
-	err := proto.Unmarshal(data, resp)
-	return resp, err
-}
-
-func ParseFilamentInfoResponse(data []byte) (*ace_v2.FilamentInfoResponse, error) {
-	resp := &ace_v2.FilamentInfoResponse{}
-	err := proto.Unmarshal(data, resp)
-	return resp, err
-}
-
-type GenericResponse struct {
-	Success bool `json:"success"`
-}
-
-func ParseGenericResponse(data []byte) (*GenericResponse, error) {
-	return &GenericResponse{Success: true}, nil
-}
-
-func SerializeDryingWithTemp(temp int, time int) []byte {
-	req := &ace_v2.DryingRequest{
-		Temperature:   uint32(temp),
-		DurationHours: uint32(time),
-	}
-	b, _ := proto.Marshal(req)
-	return b
+// TranslateACEV2ResponseToJSON returns nil in the default build so callers can
+// fall back to JSON parsing for ACE v1 devices.
+func TranslateACEV2ResponseToJSON(unwrappedV2 []byte) map[string]interface{} {
+	_ = unwrappedV2
+	return nil
 }

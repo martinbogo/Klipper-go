@@ -9,19 +9,16 @@ type ProbeEventRuntime interface {
 	BeginMCUMultiProbe()
 	EndMCUMultiProbe()
 	SendEvent(event string)
-	SyncCoreState()
 }
 
 func BeginMultiProbe(runtime ProbeEventRuntime) {
 	runtime.SendEvent("homing:multi_probe_begin")
 	runtime.BeginMCUMultiProbe()
 	runtime.Core().BeginMultiProbe()
-	runtime.SyncCoreState()
 }
 
 func EndMultiProbe(runtime ProbeEventRuntime) {
 	if runtime.Core().EndMultiProbe() {
-		runtime.SyncCoreState()
 		runtime.EndMCUMultiProbe()
 	}
 	runtime.SendEvent("homing:multi_probe_end")

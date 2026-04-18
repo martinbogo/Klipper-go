@@ -42,6 +42,21 @@ type fakeToolheadCommand struct {
 	infoMessages []string
 }
 
+type fakeToolheadVelocityConfig struct {
+	values map[string]float64
+}
+
+func (self *fakeToolheadVelocityConfig) Getfloat(option string, default1 interface{}, minval, maxval, above, below float64, noteValid bool) float64 {
+	_, _, _, _, _, _ = minval, maxval, above, below, noteValid, option
+	if value, ok := self.values[option]; ok {
+		return value
+	}
+	if value, ok := default1.(float64); ok {
+		return value
+	}
+	return 0.0
+}
+
 func (self *fakeToolheadCommand) Get_float(name string, _default interface{}, minval *float64, maxval *float64, above *float64, below *float64) float64 {
 	if value, ok := self.params[name]; ok {
 		if minval != nil && value < *minval {
@@ -93,6 +108,46 @@ func TestBuildToolheadInitialVelocityResultCalculatesDerivedFields(t *testing.T)
 	}
 	if result.Summary == "" {
 		t.Fatal("expected summary string")
+	}
+}
+
+func TestReadToolheadVelocitySettingsUsesLegacyDefaults(t *testing.T) {
+	settings := ReadToolheadVelocitySettings(&fakeToolheadVelocityConfig{values: map[string]float64{
+		"max_velocity": 250.0,
+		"max_accel":    5000.0,
+	}})
+
+	if !almostEqualFloat64(settings.MaxVelocity, 250.0) || !almostEqualFloat64(settings.MaxAccel, 5000.0) {
+		t.Fatalf("unexpected toolhead settings %#v", settings)
+	}
+	if !almostEqualFloat64(settings.RequestedAccelToDecel, 2500.0) {
+		t.Fatalf("expected default accel-to-decel to be half max accel, got %f", settings.RequestedAccelToDecel)
+	}
+	if !almostEqualFloat64(settings.SquareCornerVelocity, 5.0) {
+		t.Fatalf("expected default square corner velocity 5.0, got %f", settings.SquareCornerVelocity)
+	}
+}
+
+func TestReadToolheadVelocitySettingsUsesMinimumCruiseRatioWhenProvided(t *testing.T) {
+	settings := ReadToolheadVelocitySettings(&fakeToolheadVelocityConfig{values: map[string]float64{
+		"max_velocity":         250.0,
+		"max_accel":            5000.0,
+		"minimum_cruise_ratio": 0.2,
+	}})
+
+	if !almostEqualFloat64(settings.RequestedAccelToDecel, 4000.0) {
+		t.Fatalf("expected accel-to-decel derived from minimum_cruise_ratio, got %f", settings.RequestedAccelToDecel)
+	}
+}
+
+func TestDefaultToolheadSupportModulesReturnsCopy(t *testing.T) {
+	modules := DefaultToolheadSupportModules()
+	if got, want := strings.Join(modules, ","), "gcode_move,homing,statistics,idle_timeout,manual_probe,tuning_tower"; got != want {
+		t.Fatalf("unexpected support modules %q", got)
+	}
+	modules[0] = "changed"
+	if next := DefaultToolheadSupportModules()[0]; next != "gcode_move" {
+		t.Fatalf("expected independent copy of support modules, got %q", next)
 	}
 }
 
@@ -149,6 +204,31 @@ func TestHandleToolheadSetVelocityLimitCommandUpdatesState(t *testing.T) {
 	}
 	if result.Summary == "" {
 		t.Fatal("expected summary string")
+	}
+}
+
+func TestHandleToolheadSetVelocityLimitCommandAcceptsMinimumCruiseRatio(t *testing.T) {
+	context := &fakeToolheadCommandContext{settings: ToolheadVelocitySettings{
+		MaxVelocity:           100.0,
+		MaxAccel:              1000.0,
+		RequestedAccelToDecel: 500.0,
+		SquareCornerVelocity:  5.0,
+	}}
+	command := &fakeToolheadCommand{params: map[string]float64{
+		"ACCEL":                2000.0,
+		"MINIMUM_CRUISE_RATIO": 0.25,
+	}}
+
+	_, queryOnly := HandleToolheadSetVelocityLimitCommand(context, command)
+
+	if queryOnly {
+		t.Fatal("expected update command, got query-only result")
+	}
+	if !almostEqualFloat64(context.settings.MaxAccel, 2000.0) {
+		t.Fatalf("unexpected max accel %.6f", context.settings.MaxAccel)
+	}
+	if !almostEqualFloat64(context.settings.RequestedAccelToDecel, 1500.0) {
+		t.Fatalf("expected accel-to-decel derived from minimum_cruise_ratio, got %.6f", context.settings.RequestedAccelToDecel)
 	}
 }
 

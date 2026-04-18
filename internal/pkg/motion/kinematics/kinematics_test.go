@@ -38,7 +38,7 @@ func (self *fakeEndstop) Add_stepper(stepper Stepper) {
 }
 
 type setupCall struct {
-	alloc string
+	alloc  string
 	params []interface{}
 }
 
@@ -324,6 +324,25 @@ func TestCartesianDualCarriageUsesAxisByteAndActivatesRail(t *testing.T) {
 	}
 }
 
+func TestCartesianRailsReturnsDefensiveCopy(t *testing.T) {
+	xRail := &fakeRail{name: "stepper_x", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{}}
+	yRail := &fakeRail{name: "stepper_y", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{}}
+	zRail := &fakeRail{name: "stepper_z", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{}}
+	kin := NewCartesian(CartesianConfig{
+		Toolhead:     &fakeToolhead{},
+		Rails:        []Rail{xRail, yRail, zRail},
+		MaxZVelocity: 20,
+		MaxZAccel:    20,
+	})
+
+	rails := kin.Rails()
+	rails[0] = &fakeRail{name: "mutated"}
+
+	if kin.Rails()[0] != xRail {
+		t.Fatalf("expected rails copy to leave internal state untouched, got %#v", kin.Rails()[0])
+	}
+}
+
 func TestNewCoreXYSharesEndstops(t *testing.T) {
 	xEndstop := &fakeEndstop{}
 	yEndstop := &fakeEndstop{}
@@ -356,6 +375,103 @@ func TestNewCoreXYSharesEndstops(t *testing.T) {
 	}
 }
 
+func TestCoreXYRailsReturnsDefensiveCopy(t *testing.T) {
+	xRail := &fakeRail{name: "stepper_x", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{}}
+	yRail := &fakeRail{name: "stepper_y", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{}}
+	zRail := &fakeRail{name: "stepper_z", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{}}
+	kin := NewCoreXY(CoreXYConfig{
+		Toolhead:     &fakeToolhead{},
+		Rails:        []Rail{xRail, yRail, zRail},
+		MaxZVelocity: 20,
+		MaxZAccel:    20,
+	})
+
+	rails := kin.Rails()
+	rails[1] = &fakeRail{name: "mutated"}
+
+	if kin.Rails()[1] != yRail {
+		t.Fatalf("expected rails copy to leave internal state untouched, got %#v", kin.Rails()[1])
+	}
+}
+
+func TestCoreXYHomeHomesYBeforeXWhenBothRequested(t *testing.T) {
+	xRail := &fakeRail{name: "stepper_x", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{PositionEndstop: 1}}
+	yRail := &fakeRail{name: "stepper_y", rangeMin: 0, rangeMax: 200, homingInfo: &RailHomingInfo{PositionEndstop: 2}}
+	zRail := &fakeRail{name: "stepper_z", rangeMin: 0, rangeMax: 300, homingInfo: &RailHomingInfo{PositionEndstop: 3}}
+	kin := NewCoreXY(CoreXYConfig{
+		Toolhead:     &fakeToolhead{},
+		Rails:        []Rail{xRail, yRail, zRail},
+		MaxZVelocity: 20,
+		MaxZAccel:    20,
+	})
+	state := &fakeHomingState{axes: []int{0, 1}}
+
+	kin.Home(state)
+
+	if got, want := len(state.calls), 2; got != want {
+		t.Fatalf("home calls = %d, want %d", got, want)
+	}
+	if got, want := state.calls[0].rails[0].Get_name(false), "stepper_y"; got != want {
+		t.Fatalf("first homed rail = %q, want %q", got, want)
+	}
+	if got, want := state.calls[1].rails[0].Get_name(false), "stepper_x"; got != want {
+		t.Fatalf("second homed rail = %q, want %q", got, want)
+	}
+}
+
+func TestCoreXYHomePreservesOrderWhenOnlyOneOfXYRequested(t *testing.T) {
+	xRail := &fakeRail{name: "stepper_x", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{PositionEndstop: 1}}
+	yRail := &fakeRail{name: "stepper_y", rangeMin: 0, rangeMax: 200, homingInfo: &RailHomingInfo{PositionEndstop: 2}}
+	zRail := &fakeRail{name: "stepper_z", rangeMin: 0, rangeMax: 300, homingInfo: &RailHomingInfo{PositionEndstop: 3}}
+	kin := NewCoreXY(CoreXYConfig{
+		Toolhead:     &fakeToolhead{},
+		Rails:        []Rail{xRail, yRail, zRail},
+		MaxZVelocity: 20,
+		MaxZAccel:    20,
+	})
+	state := &fakeHomingState{axes: []int{2, 0}}
+
+	kin.Home(state)
+
+	if got, want := len(state.calls), 2; got != want {
+		t.Fatalf("home calls = %d, want %d", got, want)
+	}
+	if got, want := state.calls[0].rails[0].Get_name(false), "stepper_z"; got != want {
+		t.Fatalf("first homed rail = %q, want %q", got, want)
+	}
+	if got, want := state.calls[1].rails[0].Get_name(false), "stepper_x"; got != want {
+		t.Fatalf("second homed rail = %q, want %q", got, want)
+	}
+}
+
+func TestCoreXYHomeKeepsNonXYAxesInPlaceWhenReorderingXY(t *testing.T) {
+	xRail := &fakeRail{name: "stepper_x", rangeMin: 0, rangeMax: 100, homingInfo: &RailHomingInfo{PositionEndstop: 1}}
+	yRail := &fakeRail{name: "stepper_y", rangeMin: 0, rangeMax: 200, homingInfo: &RailHomingInfo{PositionEndstop: 2}}
+	zRail := &fakeRail{name: "stepper_z", rangeMin: 0, rangeMax: 300, homingInfo: &RailHomingInfo{PositionEndstop: 3}}
+	kin := NewCoreXY(CoreXYConfig{
+		Toolhead:     &fakeToolhead{},
+		Rails:        []Rail{xRail, yRail, zRail},
+		MaxZVelocity: 20,
+		MaxZAccel:    20,
+	})
+	state := &fakeHomingState{axes: []int{2, 0, 1}}
+
+	kin.Home(state)
+
+	if got, want := len(state.calls), 3; got != want {
+		t.Fatalf("home calls = %d, want %d", got, want)
+	}
+	if got, want := state.calls[0].rails[0].Get_name(false), "stepper_z"; got != want {
+		t.Fatalf("first homed rail = %q, want %q", got, want)
+	}
+	if got, want := state.calls[1].rails[0].Get_name(false), "stepper_y"; got != want {
+		t.Fatalf("second homed rail = %q, want %q", got, want)
+	}
+	if got, want := state.calls[2].rails[0].Get_name(false), "stepper_x"; got != want {
+		t.Fatalf("third homed rail = %q, want %q", got, want)
+	}
+}
+
 func TestNoneStatusReturnsAxesMinMax(t *testing.T) {
 	kin := NewNone(NoneConfig{AxesMinMax: []string{"1", "2", "3", "4"}})
 	status := kin.Status(0)
@@ -364,5 +480,108 @@ func TestNoneStatusReturnsAxesMinMax(t *testing.T) {
 	}
 	if got := status["axis_minimum"].([]string); len(got) != 4 || got[2] != "3" {
 		t.Fatalf("unexpected axis_minimum %#v", got)
+	}
+}
+
+func TestRailFuncsDelegateToClosures(t *testing.T) {
+	stepper := &fakeStepper{name: "stepper_x"}
+	endstop := &fakeEndstop{}
+	setupCalls := 0
+	trapqCalls := 0
+	rail := &RailFuncs{
+		SetupItersolveFunc: func(alloc string, params ...interface{}) {
+			setupCalls++
+			if alloc != "cartesian_stepper_alloc" || len(params) != 1 || params[0] != byte('x') {
+				t.Fatalf("unexpected setup args alloc=%q params=%#v", alloc, params)
+			}
+		},
+		GetSteppersFunc: func() []Stepper {
+			return []Stepper{stepper}
+		},
+		PrimaryEndstopFunc: func() RailEndstop {
+			return endstop
+		},
+		GetRangeFunc: func() (float64, float64) {
+			return 1.5, 9.5
+		},
+		SetPositionFunc: func(newpos []float64) {
+			if len(newpos) != 4 || newpos[0] != 7 {
+				t.Fatalf("unexpected position payload %#v", newpos)
+			}
+		},
+		GetHomingInfoFunc: func() *RailHomingInfo {
+			return &RailHomingInfo{Speed: 22.5}
+		},
+		SetTrapqFunc: func(tq interface{}) {
+			trapqCalls++
+			if tq != "trapq" {
+				t.Fatalf("unexpected trapq %#v", tq)
+			}
+		},
+		GetCommandedPositionFunc: func() float64 {
+			return 42.5
+		},
+		GetNameFunc: func(short bool) string {
+			if short {
+				return "x"
+			}
+			return "stepper_x"
+		},
+	}
+	rail.Setup_itersolve("cartesian_stepper_alloc", byte('x'))
+	if got := rail.Get_steppers(); len(got) != 1 || got[0] != stepper {
+		t.Fatalf("unexpected stepper slice %#v", got)
+	}
+	rail.Primary_endstop().Add_stepper(stepper)
+	if len(endstop.added) != 1 || endstop.added[0] != stepper {
+		t.Fatalf("unexpected endstop additions %#v", endstop.added)
+	}
+	if min, max := rail.Get_range(); min != 1.5 || max != 9.5 {
+		t.Fatalf("unexpected range %v,%v", min, max)
+	}
+	rail.Set_position([]float64{7, 0, 0, 0})
+	if info := rail.Get_homing_info(); info.Speed != 22.5 {
+		t.Fatalf("unexpected homing info %#v", info)
+	}
+	rail.Set_trapq("trapq")
+	if trapqCalls != 1 {
+		t.Fatalf("expected one trapq call, got %d", trapqCalls)
+	}
+	if got := rail.Get_commanded_position(); got != 42.5 {
+		t.Fatalf("unexpected commanded position %v", got)
+	}
+	if got := rail.Get_name(false); got != "stepper_x" {
+		t.Fatalf("unexpected name %q", got)
+	}
+	if setupCalls != 1 {
+		t.Fatalf("expected one setup call, got %d", setupCalls)
+	}
+}
+
+func TestHomingStateFuncsDelegateToClosures(t *testing.T) {
+	rails := []Rail{&fakeRail{name: "stepper_x"}}
+	force := []interface{}{1.0, nil, nil, nil}
+	home := []interface{}{2.0, nil, nil, nil}
+	called := 0
+	state := &HomingStateFuncs{
+		GetAxesFunc: func() []int {
+			return []int{0, 2}
+		},
+		HomeRailsFunc: func(gotRails []Rail, gotForce []interface{}, gotHome []interface{}) {
+			called++
+			if len(gotRails) != 1 || gotRails[0] != rails[0] {
+				t.Fatalf("unexpected rails %#v", gotRails)
+			}
+			if gotForce[0] != 1.0 || gotHome[0] != 2.0 {
+				t.Fatalf("unexpected force/home %#v %#v", gotForce, gotHome)
+			}
+		},
+	}
+	if axes := state.GetAxes(); len(axes) != 2 || axes[1] != 2 {
+		t.Fatalf("unexpected axes %#v", axes)
+	}
+	state.HomeRails(rails, force, home)
+	if called != 1 {
+		t.Fatalf("expected one homing call, got %d", called)
 	}
 }

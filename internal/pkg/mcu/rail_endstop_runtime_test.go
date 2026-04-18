@@ -2,6 +2,22 @@ package mcu
 
 import "testing"
 
+type fakeRailEndstopAdder struct {
+	steppers []interface{}
+}
+
+func (self *fakeRailEndstopAdder) AddStepper(stepper interface{}) {
+	self.steppers = append(self.steppers, stepper)
+}
+
+type fakeLegacyRailEndstopAdder struct {
+	steppers []interface{}
+}
+
+func (self *fakeLegacyRailEndstopAdder) Add_stepper(stepper interface{}) {
+	self.steppers = append(self.steppers, stepper)
+}
+
 func TestResolveLegacyRailEndstopCreatesAndRegistersNewEndstop(t *testing.T) {
 	createdCount := 0
 	registered := []struct {
@@ -94,5 +110,54 @@ func TestResolveLegacyRailEndstopDetectsSharedSettingsConflict(t *testing.T) {
 	}
 	if err.Error() != "shared endstop pin mcu:PA1 must specify the same pullup/invert settings" {
 		t.Fatalf("unexpected error %q", err.Error())
+	}
+}
+
+func TestLegacyRailEndstopEntriesFromRawMapCopiesProjectShape(t *testing.T) {
+	raw := map[string]interface{}{
+		"mcu:PA1": map[string]interface{}{"endstop": "endstop0", "invert": 1, "pullup": 0},
+	}
+
+	entries := LegacyRailEndstopEntriesFromRawMap(raw)
+	entry := entries["mcu:PA1"]
+	if entry.Endstop != "endstop0" || entry.Invert != 1 || entry.Pullup != 0 {
+		t.Fatalf("unexpected converted entry %#v", entry)
+	}
+
+	raw["mcu:PA1"].(map[string]interface{})["invert"] = 0
+	if entries["mcu:PA1"].Invert != 1 {
+		t.Fatalf("expected converted map to be independent, got %#v", entries["mcu:PA1"])
+	}
+}
+
+func TestRawLegacyRailEndstopEntryBuildsProjectShape(t *testing.T) {
+	raw := RawLegacyRailEndstopEntry(RailEndstopEntry{Endstop: "endstop1", Invert: 0, Pullup: 1})
+	if raw["endstop"] != "endstop1" || raw["invert"] != 0 || raw["pullup"] != 1 {
+		t.Fatalf("unexpected raw entry %#v", raw)
+	}
+}
+
+func TestAttachStepperToLegacyRailEndstopUsesAdderInterface(t *testing.T) {
+	endstop := &fakeRailEndstopAdder{}
+	stepper := "stepper_x"
+	if !AttachStepperToLegacyRailEndstop(endstop, stepper) {
+		t.Fatal("expected stepper attachment to succeed")
+	}
+	if len(endstop.steppers) != 1 || endstop.steppers[0] != stepper {
+		t.Fatalf("unexpected attached steppers %#v", endstop.steppers)
+	}
+	if AttachStepperToLegacyRailEndstop("not-an-endstop", stepper) {
+		t.Fatal("expected unsupported endstop attachment to report false")
+	}
+}
+
+func TestAttachStepperToLegacyRailEndstopUsesLegacyAdderInterface(t *testing.T) {
+	endstop := &fakeLegacyRailEndstopAdder{}
+	stepper := "stepper_y"
+	if !AttachStepperToLegacyRailEndstop(endstop, stepper) {
+		t.Fatal("expected legacy stepper attachment to succeed")
+	}
+	if len(endstop.steppers) != 1 || endstop.steppers[0] != stepper {
+		t.Fatalf("unexpected attached legacy steppers %#v", endstop.steppers)
 	}
 }

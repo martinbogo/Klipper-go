@@ -48,6 +48,36 @@ func BuildToolheadManualMoveTarget(commandedPos []float64, coord []interface{}) 
 	return curpos
 }
 
+type ToolheadSetPositionRuntime interface {
+	FlushStepGeneration()
+	PrintTime() float64
+	SetCommandedPosition(position []float64)
+	SetKinematicPosition(newpos []float64, homingAxes []int)
+	EmitSetPositionEvent()
+}
+
+func ApplyToolheadSetPosition(runtime ToolheadSetPositionRuntime, newpos []float64, homingAxes []int, updateTrapqPosition func(printTime float64, newpos []float64)) {
+	runtime.FlushStepGeneration()
+	if updateTrapqPosition != nil {
+		updateTrapqPosition(runtime.PrintTime(), newpos)
+	}
+	runtime.SetCommandedPosition(newpos)
+	runtime.SetKinematicPosition(newpos, homingAxes)
+	runtime.EmitSetPositionEvent()
+}
+
+type ToolheadManualMoveRuntime interface {
+	CommandedPosition() []float64
+	SubmitMove(newpos []float64, speed float64)
+	EmitManualMoveEvent()
+}
+
+func RunToolheadManualMove(runtime ToolheadManualMoveRuntime, coord []interface{}, speed float64) {
+	curpos := BuildToolheadManualMoveTarget(runtime.CommandedPosition(), coord)
+	runtime.SubmitMove(curpos, speed)
+	runtime.EmitManualMoveEvent()
+}
+
 type ToolheadDwellRuntime interface {
 	GetLastMoveTime() float64
 	AdvanceMoveTime(nextPrintTime float64)
@@ -81,6 +111,20 @@ type ToolheadVelocityLimitResult struct {
 	Summary           string
 }
 
+func CalcMinimumCruiseRatio(maxAccel float64, requestedAccelToDecel float64) float64 {
+	if maxAccel <= 0.0 {
+		return 0.0
+	}
+	ratio := 1.0 - requestedAccelToDecel/maxAccel
+	if ratio < 0.0 {
+		return 0.0
+	}
+	if ratio > 1.0 {
+		return 1.0
+	}
+	return ratio
+}
+
 func CalcToolheadJunctionDeviation(squareCornerVelocity float64, maxAccel float64, requestedAccelToDecel float64) (float64, float64) {
 	scv2 := squareCornerVelocity * squareCornerVelocity
 	junctionDeviation := scv2 * (math.Sqrt(2.0) - 1.0) / maxAccel
@@ -107,9 +151,11 @@ func ApplyToolheadVelocityLimitUpdate(settings ToolheadVelocitySettings, update 
 		result.Settings.MaxAccel,
 		result.Settings.RequestedAccelToDecel,
 	)
-	result.Summary = fmt.Sprintf("max_velocity: %.6f\nmax_accel: %.6f\nmax_accel_to_decel: %.6f\nsquare_corner_velocity: %.6f",
+	minimumCruiseRatio := CalcMinimumCruiseRatio(result.Settings.MaxAccel, result.Settings.RequestedAccelToDecel)
+	result.Summary = fmt.Sprintf("max_velocity: %.6f\nmax_accel: %.6f\nminimum_cruise_ratio: %.6f\nmax_accel_to_decel: %.6f\nsquare_corner_velocity: %.6f",
 		result.Settings.MaxVelocity,
 		result.Settings.MaxAccel,
+		minimumCruiseRatio,
 		result.Settings.RequestedAccelToDecel,
 		result.Settings.SquareCornerVelocity,
 	)

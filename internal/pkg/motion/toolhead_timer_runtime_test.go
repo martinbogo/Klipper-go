@@ -137,8 +137,11 @@ func TestHandleToolheadFlushCallbackFlushesLookaheadAndCompletes(t *testing.T) {
 		state: ToolheadFlushHandlerState{
 			PrintTime:           9.0,
 			LastFlushTime:       9.4,
+			LastStepGenTime:     9.4,
 			NeedFlushTime:       9.0,
+			NeedStepGenTime:     9.0,
 			SpecialQueuingState: "",
+			KinFlushDelay:       0.001,
 		},
 		printTime:      9.0,
 		printTimeAfter: 9.2,
@@ -162,8 +165,11 @@ func TestHandleToolheadFlushCallbackAdvancesFlushes(t *testing.T) {
 		state: ToolheadFlushHandlerState{
 			PrintTime:           9.0,
 			LastFlushTime:       8.9,
+			LastStepGenTime:     9.8,
 			NeedFlushTime:       9.6,
+			NeedStepGenTime:     10.0,
 			SpecialQueuingState: "NeedPrime",
+			KinFlushDelay:       0.2,
 		},
 		printTime:      9.0,
 		printTimeAfter: 9.0,
@@ -179,6 +185,37 @@ func TestHandleToolheadFlushCallbackAdvancesFlushes(t *testing.T) {
 	}
 	if !almostEqualFloat64(waketime, 10.2) {
 		t.Fatalf("unexpected next waketime %v", waketime)
+	}
+	if runtime.doKickFlushTimer {
+		t.Fatalf("did not expect kick flush timer %#v", runtime)
+	}
+}
+
+func TestHandleToolheadFlushCallbackUsesAggressiveStepGenerationPath(t *testing.T) {
+	runtime := &fakeToolheadFlushRuntime{
+		state: ToolheadFlushHandlerState{
+			PrintTime:           9.0,
+			LastFlushTime:       8.9,
+			LastStepGenTime:     9.1,
+			NeedFlushTime:       9.6,
+			NeedStepGenTime:     10.0,
+			SpecialQueuingState: "NeedPrime",
+			KinFlushDelay:       0.2,
+		},
+		printTime:      9.0,
+		printTimeAfter: 9.0,
+	}
+
+	waketime := HandleToolheadFlushCallback(100.0, 9.0, runtime, testToolheadFlushConfig())
+
+	if runtime.flushed {
+		t.Fatalf("did not expect lookahead flush %#v", runtime)
+	}
+	if len(runtime.advanceFlushes) != 1 || !almostEqualFloat64(runtime.advanceFlushes[0], 9.3) {
+		t.Fatalf("unexpected aggressive advance flushes %#v", runtime.advanceFlushes)
+	}
+	if !almostEqualFloat64(waketime, 99.9) {
+		t.Fatalf("unexpected aggressive waketime %v", waketime)
 	}
 	if runtime.doKickFlushTimer {
 		t.Fatalf("did not expect kick flush timer %#v", runtime)

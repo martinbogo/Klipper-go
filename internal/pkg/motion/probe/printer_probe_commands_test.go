@@ -125,8 +125,8 @@ func (self *fakeProbeCommandContext) RunProbeCommand(command ProbeCommand) []flo
 	return append([]float64{}, self.runProbePos...)
 }
 
-func (self *fakeProbeCommandContext) Move(coord []interface{}, speed float64) {
-	copied := append([]interface{}{}, coord...)
+func (self *fakeProbeCommandContext) Move(coord interface{}, speed float64) {
+	copied := append([]interface{}{}, coord.([]interface{})...)
 	self.moves = append(self.moves, copied)
 	self.moveSpeeds = append(self.moveSpeeds, speed)
 }

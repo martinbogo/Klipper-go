@@ -6,7 +6,7 @@ type RailConfigPlan struct {
 	HomingPositiveDir bool
 }
 
-func BuildRailConfigPlan(positionEndstop float64, needPositionMinMax bool, positionMin float64, positionMax float64, homingPositiveDir bool) RailConfigPlan {
+func BuildRailConfigPlan(positionEndstop float64, needPositionMinMax bool, positionMin float64, positionMax float64, hasHomingPositiveDir bool, homingPositiveDir bool) RailConfigPlan {
 	if !needPositionMinMax {
 		positionMin = 0
 		positionMax = positionEndstop
@@ -14,7 +14,7 @@ func BuildRailConfigPlan(positionEndstop float64, needPositionMinMax bool, posit
 	if positionEndstop < positionMin || positionEndstop > positionMax {
 		panic("position_endstop must be between position_min and position_max")
 	}
-	if !homingPositiveDir {
+	if !hasHomingPositiveDir {
 		axisLen := positionMax - positionMin
 		if positionEndstop <= positionMin+axisLen/4 {
 			homingPositiveDir = false
@@ -23,7 +23,7 @@ func BuildRailConfigPlan(positionEndstop float64, needPositionMinMax bool, posit
 		} else {
 			panic("unable to infer homing_positive_dir")
 		}
-	} else if positionEndstop == positionMin {
+	} else if (homingPositiveDir && positionEndstop == positionMin) || (!homingPositiveDir && positionEndstop == positionMax) {
 		panic("invalid homing_positive_dir / position_endstop")
 	}
 	return RailConfigPlan{

@@ -177,7 +177,7 @@ var TMC2240Fields = map[string]map[string]int64{
 		"start_sin90":  0xFF << 16,
 		"offset_sin90": 0xFF << 24,
 	},
-	"MSCNT": {"mscnt": 0x3ff << 0},
+	"MSCNT":    {"mscnt": 0x3ff << 0},
 	"MSCURACT": {"cur_a": 0x1ff << 0, "cur_b": 0x1ff << 16},
 	"PWM_AUTO": {"pwm_ofs_auto": 0xff << 0, "pwm_grad_auto": 0xff << 16},
 	"PWMCONF": {
@@ -192,19 +192,19 @@ var TMC2240Fields = map[string]map[string]int64{
 		"pwm_reg":            0x0F << 24,
 		"pwm_lim":            0x0F << 28,
 	},
-	"PWM_SCALE": {"pwm_scale_sum": 0x3ff << 0, "pwm_scale_auto": 0x1ff << 16},
-	"TPOWERDOWN": {"tpowerdown": 0xff << 0},
-	"TPWMTHRS": {"tpwmthrs": 0xfffff << 0},
-	"TCOOLTHRS": {"tcoolthrs": 0xfffff << 0},
-	"TSTEP": {"tstep": 0xfffff << 0},
-	"THIGH": {"thigh": 0xfffff << 0},
-	"DRV_CONF": {"current_range": 0x03 << 0, "slope_control": 0x03 << 4},
+	"PWM_SCALE":       {"pwm_scale_sum": 0x3ff << 0, "pwm_scale_auto": 0x1ff << 16},
+	"TPOWERDOWN":      {"tpowerdown": 0xff << 0},
+	"TPWMTHRS":        {"tpwmthrs": 0xfffff << 0},
+	"TCOOLTHRS":       {"tcoolthrs": 0xfffff << 0},
+	"TSTEP":           {"tstep": 0xfffff << 0},
+	"THIGH":           {"thigh": 0xfffff << 0},
+	"DRV_CONF":        {"current_range": 0x03 << 0, "slope_control": 0x03 << 4},
 	"ADC_VSUPPLY_AIN": {"adc_vsupply": 0x1fff << 0, "adc_ain": 0x1fff << 16},
-	"ADC_TEMP": {"adc_temp": 0x1fff << 0},
-	"OTW_OV_VTH": {"overvoltage_vth": 0x1fff << 0, "overtempprewarning_vth": 0x1fff << 16},
-	"SG4_THRS": {"sg4_thrs": 0xFF << 0, "sg4_filt_en": 0x01 << 8, "sg4_angle_offset": 0x01 << 9},
-	"SG4_RESULT": {"sg4_result": 0x3FF << 0},
-	"SG4_IND": {"sg4_ind_0": 0xFF << 0, "sg4_ind_1": 0xFF << 8, "sg4_ind_2": 0xFF << 16, "sg4_ind_3": 0xFF << 24},
+	"ADC_TEMP":        {"adc_temp": 0x1fff << 0},
+	"OTW_OV_VTH":      {"overvoltage_vth": 0x1fff << 0, "overtempprewarning_vth": 0x1fff << 16},
+	"SG4_THRS":        {"sg4_thrs": 0xFF << 0, "sg4_filt_en": 0x01 << 8, "sg4_angle_offset": 0x01 << 9},
+	"SG4_RESULT":      {"sg4_result": 0x3FF << 0},
+	"SG4_IND":         {"sg4_ind_0": 0xFF << 0, "sg4_ind_1": 0xFF << 8, "sg4_ind_2": 0xFF << 16, "sg4_ind_3": 0xFF << 24},
 }
 
 var TMC2240SignedFields = []string{"cur_a", "cur_b", "sgt", "pwm_scale_auto", "offset_sin90"}
@@ -262,5 +262,6 @@ func ConfigureTMC2240(config ConfigFieldSource, fields *FieldHelper) {
 	setConfigField(config, "pwm_reg", 4)
 	setConfigField(config, "pwm_lim", 12)
 	setConfigField(config, "tpowerdown", 10)
+	setConfigField(config, "sg4_thrs", 0)
 	setConfigField(config, "sg4_angle_offset", true)
 }

@@ -1,6 +1,10 @@
 package print
 
-import printerpkg "goklipper/internal/pkg/printer"
+import (
+	"fmt"
+
+	printerpkg "goklipper/internal/pkg/printer"
+)
 
 type extrusionStatusSource interface {
 	Get_status(eventtime float64) map[string]interface{}
@@ -26,7 +30,12 @@ func NewPrintStatsModule(printer printerpkg.ModulePrinter, reactor printerpkg.Mo
 
 func LoadConfigPrintStats(config printerpkg.ModuleConfig) interface{} {
 	printer := config.Printer()
-	return NewPrintStatsModule(printer, printer.Reactor(), printer.LookupObject("gcode_move", nil).(extrusionStatusSource))
+	gcodeMoveObj := config.LoadObject("gcode_move")
+	gcodeMove, ok := gcodeMoveObj.(extrusionStatusSource)
+	if !ok {
+		panic(fmt.Sprintf("print_stats requires gcode_move extrusion status source: %T", gcodeMoveObj))
+	}
+	return NewPrintStatsModule(printer, printer.Reactor(), gcodeMove)
 }
 
 func (self *PrintStatsModule) extrusionStatus(eventtime float64) ExtrusionStatus {

@@ -1,11 +1,12 @@
 #!/bin/bash
 set -x
 
-opt="-Wall -g -O2 -fPIC -flto -fwhole-program -fno-use-linker-plugin"
+opt="-Wall -O2 -fPIC -flto -fwhole-program -fno-use-linker-plugin"
+link_opt="-Wl,-s"
 TARGET="$PWD/internal/pkg/chelper/libc_helper.so"
 
 rm -rf ./libc_helper.so ./libc_helper.a
-$CC $opt -shared -o $PWD/chelper/libc_helper.so $PWD/chelper/*.c
+$CC $opt $link_opt -shared -o $PWD/chelper/libc_helper.so $PWD/chelper/*.c
 # Also create static library
 $CC $opt -c $PWD/chelper/*.c
 ar rcs $PWD/chelper/libc_helper.a *.o

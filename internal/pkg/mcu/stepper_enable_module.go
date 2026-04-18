@@ -228,6 +228,15 @@ func (self *PrinterStepperEnableModule) LookupEnable(name string) (printerpkg.St
 	return self.Lookup_enable(name)
 }
 
+func (self *PrinterStepperEnableModule) SetStepperEnabled(stepperName string, printTime float64, enable bool) {
+	stepperEnable, _ := self.Lookup_enable(stepperName)
+	if enable {
+		stepperEnable.MotorEnable(printTime)
+		return
+	}
+	stepperEnable.MotorDisable(printTime)
+}
+
 func (self *PrinterStepperEnableModule) Lookup_enable(name string) (*EnableTracking, error) {
 	enableLine, ok := self.enableLines[name]
 	if !ok {

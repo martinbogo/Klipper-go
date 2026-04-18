@@ -1,7 +1,6 @@
 package filament
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 
 	"goklipper/common/logger"
 	"goklipper/common/utils/reflects"
-	ace_v2 "goklipper/internal/pkg/filament/ace_v2"
 	"goklipper/internal/pkg/queue"
 	serialpkg "goklipper/internal/pkg/serialhdl"
 
@@ -97,7 +95,9 @@ func (self *AceCommun) Connect() error {
 }
 
 func (self *AceCommun) Disconnect() {
-	self.dev.Close()
+	if self.dev != nil {
+		self.dev.Close()
+	}
 	self.is_connected = false
 	self.queue = nil
 	self.dev = nil
@@ -147,49 +147,23 @@ func (self *AceCommun) sendRequest(req map[string]interface{}) error {
 		cmd, _ = req["method"].(string)
 	}
 
-	logger.Infof("ACE proxy evaluating cmd=%s", cmd)
-
 	var frame []byte
 	var err error
 
 	switch cmd {
 	case "feed":
-		handler := ace_v2.NewV2ProtoHandler(1)
-		frame, err = handler.SerializeFeedOrRollback(50, 50)
+		frame, err = BuildACEV2RequestFrame(cmd, req)
 	case "rollback":
-		handler := ace_v2.NewV2ProtoHandler(1)
-		frame, err = handler.SerializeFeedOrRollback(-50, 50)
+		frame, err = BuildACEV2RequestFrame(cmd, req)
 	case "set_rfid":
-		enable, _ := req["enable"].(bool)
-		handler := ace_v2.NewV2ProtoHandler(1)
-		frame, err = handler.SerializeSetRfidEnable(enable)
+		frame, err = BuildACEV2RequestFrame(cmd, req)
 	case "drying":
-		params, ok := req["params"].(map[string]interface{})
-		if ok {
-			var temp, dur int
-
-			if t, ok := params["temp"].(float64); ok {
-				temp = int(t)
-			} else if t, ok := params["temp"].(int); ok {
-				temp = t
-			}
-
-			if d, ok := params["duration"].(float64); ok {
-				dur = int(d)
-			} else if d, ok := params["duration"].(int); ok {
-				dur = d
-			}
-
-			handler := ace_v2.NewV2ProtoHandler(1)
-			frame, err = handler.SerializeDrying(uint8(temp), uint8(dur/60))
-		}
+		frame, err = BuildACEV2RequestFrame(cmd, req)
 	case "drying_stop":
-		handler := ace_v2.NewV2ProtoHandler(1)
-		frame, err = handler.SerializeDrying(0, 0)
+		frame, err = BuildACEV2RequestFrame(cmd, req)
 	}
 
 	if err == nil && frame != nil {
-		logger.Infof("ACE proxy wrote proto frame for cmd=%s", cmd)
 		fd := int(self.dev.GetFd())
 		_, _ = syscall.Write(fd, frame)
 
@@ -205,10 +179,6 @@ func (self *AceCommun) sendRequest(req map[string]interface{}) error {
 			}
 		}
 	} else {
-		if err != nil {
-			logger.Errorf("ACE proxy serialization error: %v", err)
-		}
-		logger.Infof("ACE proxy passing back to V1 natively: %v", req)
 		return self.sendRequestV1(req)
 	}
 
@@ -223,7 +193,6 @@ func (self *AceCommun) Writer(eventtime float64) {
 			self.request_id += 1
 			self.callback_map[id] = task.(aceRequestInfo).callback
 			task.(aceRequestInfo).request["id"] = id
-			logger.Infof("ACE queue pumped writer payload: %v", task.(aceRequestInfo).request)
 			self.sendRequest(task.(aceRequestInfo).request)
 			self.send_time = eventtime
 		}
@@ -240,39 +209,48 @@ func (self *AceCommun) Reader(eventtime float64) error {
 	}
 
 	if n > 0 && len(raw_bytes) > 0 {
-		text_buffer := append(self.read_buffer, raw_bytes[:n]...)
-		i := bytes.IndexByte(text_buffer, FrameEnd)
-		if i >= 0 {
-			buffer = text_buffer
-			self.read_buffer = []byte{}
-		} else {
-			self.read_buffer = append(self.read_buffer, raw_bytes[:n]...)
-			return nil
-		}
-	} else {
+		self.read_buffer = append(self.read_buffer, raw_bytes[:n]...)
+	} else if len(self.read_buffer) == 0 {
 		if (eventtime - self.send_time) > 2 {
 			return fmt.Errorf(RespondTimeoutError)
 		}
 		return nil
 	}
 
-	if len(buffer) < MinFrameSize {
-		return nil
+	for len(self.read_buffer) >= MinFrameSize {
+		if self.read_buffer[0] != FrameStart1 || self.read_buffer[1] != FrameStart2 {
+			self.read_buffer = self.read_buffer[1:]
+			continue
+		}
+
+		payload_len := uint16(self.read_buffer[2]) | uint16(self.read_buffer[3])<<8
+		expected_len := int(payload_len) + MinFrameSize
+
+		// If payload_len is unreasonably large, it's likely a sync issue; skip the start bytes
+		if expected_len > 4096 {
+			self.read_buffer = self.read_buffer[1:]
+			continue
+		}
+
+		if len(self.read_buffer) >= expected_len {
+			buffer = self.read_buffer[:expected_len]
+			self.read_buffer = append([]byte(nil), self.read_buffer[expected_len:]...)
+			break
+		} else {
+			break
+		}
 	}
 
-	if buffer[0] != FrameStart1 || buffer[1] != FrameStart2 {
-		logger.Error("Invalid data from ACE PRO (head bytes)", string(buffer))
+	if len(buffer) == 0 {
+		if (eventtime - self.send_time) > 2 {
+			return fmt.Errorf(RespondTimeoutError)
+		}
 		return nil
 	}
 
 	payload_len := uint16(buffer[2]) | uint16(buffer[3])<<8
-	if len(buffer) < int(payload_len+MinFrameSize) {
-		logger.Errorf("Invalid data from ACE PRO (len) {%d} {%d} %v", payload_len, len(buffer), string(buffer))
-		return nil
-	}
-
 	if buffer[len(buffer)-1] != FrameEnd {
-		logger.Errorf("Invalid data from ACE PRO (end bytes)", string(buffer))
+		logger.Errorf("Invalid data from ACE PRO (end bytes: got %x)", buffer[len(buffer)-1])
 		return nil
 	}
 
@@ -293,7 +271,7 @@ func (self *AceCommun) Reader(eventtime float64) error {
 	if self.IsV2 {
 		unwrappedV2, errV2 := NewV2ProtoHandler().ParseResponse(payload)
 		if errV2 == nil && len(unwrappedV2) > 0 {
-			ret = ace_v2.TranslateV2ResponseToJSON(unwrappedV2)
+			ret = TranslateACEV2ResponseToJSON(unwrappedV2)
 			if ret != nil {
 				for pendingId := range self.callback_map {
 					ret["id"] = float64(pendingId)
@@ -313,7 +291,6 @@ func (self *AceCommun) Reader(eventtime float64) error {
 
 	idVal, ok := ret["id"]
 	if !ok || idVal == nil {
-		logger.Warnf("Response missing 'id', ignoring: %v", ret)
 		return nil
 	}
 
@@ -324,7 +301,6 @@ func (self *AceCommun) Reader(eventtime float64) error {
 	case int:
 		id = v
 	default:
-		logger.Warnf("Response 'id' is not a number, ignoring: %v", ret)
 		return nil
 	}
 
@@ -344,9 +320,15 @@ func (self *AceCommun) Name() string {
 }
 
 func (self *AceCommun) Fd() int {
+	if self.dev == nil {
+		return -1
+	}
 	return int(self.dev.GetFd())
 }
 
 func (self *AceCommun) Is_send_queue_empty() bool {
+	if self.queue == nil {
+		return true
+	}
 	return self.queue.Is_empty()
 }

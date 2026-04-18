@@ -30,21 +30,3 @@ func BuildInfoResponse(state, stateMessage string, startArgs map[string]interfac
 	}
 	return response
 }
-
-// BuildFilamentHubInfoResponse constructs the static response map for
-// the "filament_hub/info" webhook endpoint.
-func BuildFilamentHubInfoResponse() map[string]interface{} {
-	return map[string]interface{}{
-		"infos": []interface{}{
-			map[string]interface{}{
-				"id":                0,
-				"slots":             4,
-				"SN":                "",
-				"date":              "",
-				"model":             "Anycubic Color Engine Pro",
-				"firmware":          "V1.3.863",
-				"structure_version": "0",
-			},
-		},
-	}
-}

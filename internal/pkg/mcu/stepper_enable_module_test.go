@@ -21,7 +21,6 @@ func (self *fakeStepperEnableCommand) String(name string, defaultValue string) s
 	return defaultValue
 }
 
-
 func (self *fakeStepperEnableCommand) Float(_ string, defaultValue float64) float64 {
 	return defaultValue
 }
@@ -74,7 +73,6 @@ func (self *fakeStepperEnableGCode) IsBusy() bool { return false }
 func (self *fakeStepperEnableGCode) Mutex() printerpkg.Mutex { return self.mutex }
 
 func (self *fakeStepperEnableGCode) RespondInfo(msg string, log bool) {}
-
 
 func (self *fakeStepperEnableGCode) ReplaceCommand(_ string, _ func(printerpkg.Command) error, _ bool, _ string) func(printerpkg.Command) error {
 	return nil
@@ -187,7 +185,9 @@ func (self *fakeStepperEnablePrinter) HasStartArg(name string) bool { return fal
 
 func (self *fakeStepperEnablePrinter) LookupHeater(name string) printerpkg.HeaterRuntime { return nil }
 
-func (self *fakeStepperEnablePrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry { return nil }
+func (self *fakeStepperEnablePrinter) TemperatureSensors() printerpkg.TemperatureSensorRegistry {
+	return nil
+}
 
 func (self *fakeStepperEnablePrinter) LookupMCU(name string) printerpkg.MCURuntime { return nil }
 
@@ -221,12 +221,13 @@ func (self *fakeStepperEnableConfig) String(option string, defaultValue string, 
 
 func (self *fakeStepperEnableConfig) Bool(option string, defaultValue bool) bool { return defaultValue }
 
-func (self *fakeStepperEnableConfig) Float(option string, defaultValue float64) float64 { return defaultValue }
+func (self *fakeStepperEnableConfig) Float(option string, defaultValue float64) float64 {
+	return defaultValue
+}
 
 func (self *fakeStepperEnableConfig) OptionalFloat(option string) *float64 { return nil }
 
 func (self *fakeStepperEnableConfig) LoadObject(section string) interface{} { return nil }
-
 
 func (self *fakeStepperEnableConfig) LoadTemplate(_ string, _ string, _ string) printerpkg.Template {
 	return nil
@@ -242,7 +243,6 @@ type fakeStepperEnableStepper struct {
 	name      string
 	callbacks []func(float64)
 }
-
 
 func (self *fakeStepperEnableStepper) Get_name(_ bool) string {
 	return self.name
@@ -367,5 +367,49 @@ func TestStepperEnableCmdSetStepperEnableAndMotorOff(t *testing.T) {
 	}
 	if got, want := invalid.infoResponses, []string{"set_stepper_enable: Invalid stepper missing"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("invalid stepper responses = %v, want %v", got, want)
+	}
+}
+
+func TestStepperEnableCallbackRunsAfterEnablePinSet(t *testing.T) {
+	module, _, pins, _ := newFakeStepperEnableModule()
+	stepperX := &fakeStepperEnableStepper{name: "stepper_x"}
+	module.Register_stepper(&fakeStepperEnableConfig{stringValues: map[string]string{"enable_pin": "PC3"}}, stepperX)
+
+	line, err := module.Lookup_enable("stepper_x")
+	if err != nil {
+		t.Fatalf("Lookup_enable(stepper_x) returned error: %v", err)
+	}
+	digitalOut := pins.chip.pins["PC3"]
+	if digitalOut == nil {
+		t.Fatalf("expected dedicated enable pin to be created")
+	}
+
+	callbackPrintTimes := []float64{}
+	callbackEnableFlags := []bool{}
+	callbackStateSnapshots := []bool{}
+	callbackPinCallCounts := []int{}
+	line.Register_state_callback(func(printTime float64, isEnable bool) {
+		callbackPrintTimes = append(callbackPrintTimes, printTime)
+		callbackEnableFlags = append(callbackEnableFlags, isEnable)
+		callbackStateSnapshots = append(callbackStateSnapshots, line.Is_motor_enabled())
+		callbackPinCallCounts = append(callbackPinCallCounts, len(digitalOut.setCalls))
+	})
+
+	stepperX.TriggerActive(7.25)
+
+	if got, want := digitalOut.setCalls, [][2]float64{{7.25, 1}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("enable pin calls after active trigger = %v, want %v", got, want)
+	}
+	if got, want := callbackPrintTimes, []float64{7.25}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("callback print times = %v, want %v", got, want)
+	}
+	if got, want := callbackEnableFlags, []bool{true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("callback enable flags = %v, want %v", got, want)
+	}
+	if got, want := callbackStateSnapshots, []bool{true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("callback state snapshots = %v, want %v", got, want)
+	}
+	if got, want := callbackPinCallCounts, []int{1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("callback pin call counts = %v, want %v", got, want)
 	}
 }

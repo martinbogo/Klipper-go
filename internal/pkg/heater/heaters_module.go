@@ -222,6 +222,13 @@ func pwmEstimator(self *Heater) heaterMCUEstimator {
 	return estimator
 }
 
+func defaultMinExtrudeTemp(heaterName string, maxTemp float64) float64 {
+	if strings.HasPrefix(strings.ToLower(heaterName), "extruder") {
+		return math.Min(170., maxTemp)
+	}
+	return 0.
+}
+
 func NewHeater(config printerpkg.ModuleConfig, sensor printerpkg.TemperatureSensor) *Heater {
 	self := &Heater{}
 	self.Printer = config.Printer()
@@ -233,7 +240,12 @@ func NewHeater(config printerpkg.ModuleConfig, sensor printerpkg.TemperatureSens
 	self.Sensor.SetupMinMax(self.Min_temp, self.Max_temp)
 	self.Sensor.SetupCallback(self.Temperature_callback)
 	self.Pwm_delay = self.Sensor.GetReportTimeDelta()
-	self.Min_extrude_temp = configFloat(config, "min_extrude_temp", 170., self.Min_temp, self.Max_temp, 0., 0., false)
+	defaultMinExtrudeTemp := defaultMinExtrudeTemp(self.Name, self.Max_temp)
+	minExtrudeLowerBound := self.Min_temp
+	if defaultMinExtrudeTemp <= 0. {
+		minExtrudeLowerBound = 0.
+	}
+	self.Min_extrude_temp = configFloat(config, "min_extrude_temp", defaultMinExtrudeTemp, minExtrudeLowerBound, self.Max_temp, 0., 0., false)
 	self.Can_extrude = self.Min_extrude_temp <= 0. || self.Printer.HasStartArg("debugoutput")
 	self.Max_power = configFloat(config, "max_power", 1., 0., 1., 0., 0., false)
 	self.Smooth_time = configFloat(config, "smooth_time", 1., 0., 0., 0., 0., false)

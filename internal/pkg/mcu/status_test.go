@@ -1,6 +1,9 @@
 package mcu
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildEmergencyStopDecision(t *testing.T) {
 	if !BuildEmergencyStopDecision(false, false, false).Skip {
@@ -45,5 +48,37 @@ func TestBuildConfiguredMCUInfo(t *testing.T) {
 	}
 	if info.RolloverInfo != "base-info\nConfigured MCU 'mcu' (42 moves)" {
 		t.Fatalf("unexpected rollover info %q", info.RolloverInfo)
+	}
+}
+
+func TestMCUStatusTrackerTracksStatusAndStats(t *testing.T) {
+	tracker := NewMCUStatusTracker()
+	tracker.SetStatusInfo(map[string]interface{}{"mcu_version": "v1"})
+	tracker.SetStatsSumsqBase(1.0)
+	if err := tracker.HandleMCUStats(map[string]interface{}{
+		"count": int64(2),
+		"sum":   int64(4),
+		"sumsq": int64(8),
+	}, 2.0); err != nil {
+		t.Fatalf("unexpected stats error: %v", err)
+	}
+	ok, summary := tracker.Stats("mcu", "serial=1", "clock=2")
+	if !ok {
+		t.Fatalf("expected status tracker stats to succeed")
+	}
+	if !strings.Contains(summary, "mcu: mcu_awake=2.000 mcu_task_avg=1.000000 mcu_task_stddev=0.000000") {
+		t.Fatalf("unexpected summary %q", summary)
+	}
+	lastStats, ok := tracker.StatusInfo()["last_stats"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected last_stats map, got %#v", tracker.StatusInfo()["last_stats"])
+	}
+	if lastStats["serial"] != 1 || lastStats["clock"] != 2 {
+		t.Fatalf("unexpected parsed last_stats %#v", lastStats)
+	}
+	copy := tracker.GetStatus()
+	copy["mcu_version"] = "mutated"
+	if tracker.StatusInfo()["mcu_version"] != "v1" {
+		t.Fatalf("expected deep-copied status info, got %#v", tracker.StatusInfo())
 	}
 }

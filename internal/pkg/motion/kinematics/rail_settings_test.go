@@ -9,6 +9,7 @@ type fakeRailConfig struct {
 	name        string
 	floatValues map[string]float64
 	boolValues  map[string]bool
+	hasOptions  map[string]bool
 	boolCalls   []struct {
 		option       string
 		defaultValue bool
@@ -17,6 +18,13 @@ type fakeRailConfig struct {
 
 func (self *fakeRailConfig) Get_name() string {
 	return self.name
+}
+
+func (self *fakeRailConfig) HasOption(option string) bool {
+	if self.hasOptions == nil {
+		return false
+	}
+	return self.hasOptions[option]
 }
 
 func (self *fakeRailConfig) Getfloat(option string, default1 interface{}, minval, maxval, above, below float64, noteValid bool) float64 {
@@ -72,7 +80,7 @@ func TestBuildLegacyRailSettingsUsesEndstopProvider(t *testing.T) {
 	if settings.HomingSpeed != 8 || settings.SecondHomingSpeed != 4 {
 		t.Fatalf("unexpected homing speeds %#v", settings)
 	}
-	if len(config.boolCalls) != 2 || config.boolCalls[0].option != "homing_positive_dir" || config.boolCalls[0].defaultValue || config.boolCalls[1].option != "homing_positive_dir" || !config.boolCalls[1].defaultValue {
+	if len(config.boolCalls) != 1 || config.boolCalls[0].option != "homing_positive_dir" || !config.boolCalls[0].defaultValue {
 		t.Fatalf("expected inferred homing_positive_dir to be fed back to config, got %#v", config.boolCalls)
 	}
 }
@@ -97,8 +105,33 @@ func TestBuildLegacyRailSettingsReadsConfiguredPositionEndstop(t *testing.T) {
 	if settings.HomingPositiveDir {
 		t.Fatalf("expected homing direction to infer negative near minimum, got %#v", settings)
 	}
-	if len(config.boolCalls) != 2 || config.boolCalls[0].defaultValue || config.boolCalls[1].defaultValue {
+	if len(config.boolCalls) != 1 || config.boolCalls[0].defaultValue {
 		t.Fatalf("expected inferred negative homing_positive_dir callback, got %#v", config.boolCalls)
+	}
+}
+
+func TestBuildLegacyRailSettingsRespectsExplicitHomingDirection(t *testing.T) {
+	config := &fakeRailConfig{
+		name: "stepper_x",
+		floatValues: map[string]float64{
+			"position_endstop": 1,
+			"position_min":     0,
+			"position_max":     10,
+		},
+		boolValues: map[string]bool{
+			"homing_positive_dir": false,
+		},
+		hasOptions: map[string]bool{
+			"homing_positive_dir": true,
+		},
+	}
+
+	settings := BuildLegacyRailSettings(config, struct{}{}, true, (*float64)(nil))
+	if settings.HomingPositiveDir {
+		t.Fatalf("expected explicit homing_positive_dir=false to be preserved")
+	}
+	if len(config.boolCalls) != 0 {
+		t.Fatalf("expected no inferred homing_positive_dir callback when explicitly configured, got %#v", config.boolCalls)
 	}
 }
 
@@ -152,6 +185,38 @@ func TestBuildLegacyRailSettingsWrapsAmbiguousDirectionError(t *testing.T) {
 			"position_max":     10,
 		},
 		boolValues: map[string]bool{},
+	}
+	BuildLegacyRailSettings(config, struct{}{}, true, (*float64)(nil))
+}
+
+func TestBuildLegacyRailSettingsWrapsExplicitDirectionMismatchError(t *testing.T) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatalf("expected wrapped explicit-direction mismatch panic")
+		}
+		err, ok := recovered.(error)
+		if !ok {
+			t.Fatalf("expected error panic, got %T", recovered)
+		}
+		want := fmt.Sprintf("Invalid homing_positive_dir / Position_endstop in '%s'", "stepper_y")
+		if err.Error() != want {
+			t.Fatalf("unexpected error %q", err.Error())
+		}
+	}()
+	config := &fakeRailConfig{
+		name: "stepper_y",
+		floatValues: map[string]float64{
+			"position_endstop": 10,
+			"position_min":     0,
+			"position_max":     10,
+		},
+		boolValues: map[string]bool{
+			"homing_positive_dir": false,
+		},
+		hasOptions: map[string]bool{
+			"homing_positive_dir": true,
+		},
 	}
 	BuildLegacyRailSettings(config, struct{}{}, true, (*float64)(nil))
 }

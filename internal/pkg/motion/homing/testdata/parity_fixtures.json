@@ -1,0 +1,44 @@
+{
+  "home_rails_outcomes": [
+    {
+      "name": "applies_adjustment_after_callback",
+      "forcepos": [-5, null, null, null],
+      "movepos": [10, null, null, null],
+      "trigger_pos": [10, 0, 0, 0],
+      "trigger_time": 1.25,
+      "stepper": {
+        "name": "x",
+        "commanded_position": 10,
+        "triggered_position": 42
+      },
+      "after_home_adjustment": 2,
+      "after_home_error": "",
+      "expected": {
+        "error": "",
+        "set_position_calls": 2,
+        "final_x": 12,
+        "trigger_x": 42
+      }
+    },
+    {
+      "name": "callback_error_blocks_adjustment",
+      "forcepos": [-5, null, null, null],
+      "movepos": [10, null, null, null],
+      "trigger_pos": [10, 0, 0, 0],
+      "trigger_time": 1.25,
+      "stepper": {
+        "name": "x",
+        "commanded_position": 10,
+        "triggered_position": 42
+      },
+      "after_home_adjustment": 2,
+      "after_home_error": "home_rails_end failed",
+      "expected": {
+        "error": "home_rails_end failed",
+        "set_position_calls": 1,
+        "final_x": -5,
+        "trigger_x": 42
+      }
+    }
+  ]
+}

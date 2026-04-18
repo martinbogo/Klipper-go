@@ -8,6 +8,7 @@ import (
 	"goklipper/common/value"
 	"math/bits"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +28,8 @@ type FieldHelper struct {
 	signedFields    map[string]int
 	fieldFormatters map[string]func(interface{}) string
 	registers       map[string]interface{}
+	registerOrder   []string
+	registerSeen    map[string]struct{}
 	fieldToRegister map[string]string
 }
 
@@ -41,9 +44,15 @@ func NewFieldHelper(allFields map[string]map[string]int64, signedFields []string
 
 	self.fieldFormatters = fieldFormatters
 	self.registers = make(map[string]interface{})
+	self.registerSeen = make(map[string]struct{})
 	if registers != nil {
-		for k, v := range *registers {
+		keys := str.MapStringKeys(*registers)
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := (*registers)[k]
 			self.registers[k] = v
+			self.registerOrder = append(self.registerOrder, k)
+			self.registerSeen[k] = struct{}{}
 		}
 	}
 
@@ -90,10 +99,36 @@ func (self *FieldHelper) Set_field(fieldName string, fieldValue interface{}, reg
 	if value.IsNone(regValue) {
 		regValue = self.registers[regName.(string)]
 	}
-	mask := self.allFields[regName.(string)][fieldName]
+	resolvedRegName := regName.(string)
+	mask := self.allFields[resolvedRegName][fieldName]
 	newValue := (cast.ToInt64(regValue) & ^mask) | ((cast.ToInt64(fieldValue) << ffs(mask)) & mask)
-	self.registers[regName.(string)] = newValue
+	self.trackRegister(resolvedRegName)
+	self.registers[resolvedRegName] = newValue
 	return newValue
+}
+
+func (self *FieldHelper) trackRegister(regName string) {
+	if _, ok := self.registerSeen[regName]; ok {
+		return
+	}
+	self.registerOrder = append(self.registerOrder, regName)
+	self.registerSeen[regName] = struct{}{}
+}
+
+func (self *FieldHelper) orderedRegisterNames() []string {
+	ordered := append([]string(nil), self.registerOrder...)
+	if len(ordered) == len(self.registers) {
+		return ordered
+	}
+	extra := make([]string, 0, len(self.registers)-len(ordered))
+	for regName := range self.registers {
+		if _, ok := self.registerSeen[regName]; ok {
+			continue
+		}
+		extra = append(extra, regName)
+	}
+	sort.Strings(extra)
+	return append(ordered, extra...)
 }
 
 func (self *FieldHelper) Set_config_field(config ConfigFieldSource, fieldName string, defaultValue interface{}) int64 {
@@ -133,10 +168,15 @@ func (self *FieldHelper) Pretty_format(regName string, regValue interface{}) str
 	fields := make([]string, 0, len(keys))
 	for _, fieldName := range keys {
 		fieldValue := self.Get_field(fieldName, regValue, cast.StringP(regName))
-		if self.fieldFormatters[fieldName] == nil {
-			continue
+		var stringValue string
+		if self.fieldFormatters[fieldName] != nil {
+			// Use the custom formatter if one is registered.
+			stringValue = self.fieldFormatters[fieldName](fieldValue)
+		} else {
+			// Match Python's str() default: show every non-zero field even
+			// if no custom formatter is registered for it.
+			stringValue = strconv.FormatInt(fieldValue, 10)
 		}
-		stringValue := self.fieldFormatters[fieldName](fieldValue)
 		if len(stringValue) != 0 && stringValue != "0" {
 			fields = append(fields, fmt.Sprintf(" %s=%s", fieldName, stringValue))
 		}

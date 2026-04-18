@@ -98,9 +98,10 @@ func (self *fakeProbeRunContext) Probe(speed float64) []float64 {
 	return pos
 }
 
-func (self *fakeProbeRunContext) Move(coord []interface{}, speed float64) {
-	copyCoord := make([]interface{}, len(coord))
-	copy(copyCoord, coord)
+func (self *fakeProbeRunContext) Move(coord interface{}, speed float64) {
+	typed := coord.([]interface{})
+	copyCoord := make([]interface{}, len(typed))
+	copy(copyCoord, typed)
 	self.moves = append(self.moves, copyCoord)
 	self.moveSpeeds = append(self.moveSpeeds, speed)
 }

@@ -17,6 +17,10 @@ type RequestParams struct {
 	Params map[string]interface{}
 }
 
+func (r *RequestParams) GetParams() map[string]interface{} {
+	return r.Params
+}
+
 func (r *RequestParams) Get_dict(item string, default1 interface{}) map[string]interface{} {
 	obj := r.Get(item, default1, []reflect.Kind{reflect.Map})
 	if obj == nil {
@@ -39,6 +43,14 @@ func (r *RequestParams) Get_str(item string, default1 interface{}) string {
 		return v
 	}
 	return ""
+}
+
+func (r *RequestParams) GetDict(item string, defaultValue interface{}) map[string]interface{} {
+	return r.Get_dict(item, defaultValue)
+}
+
+func (r *RequestParams) GetStr(item string, defaultValue interface{}) string {
+	return r.Get_str(item, defaultValue)
 }
 
 func (r *RequestParams) Get_int(item string, default_value int) int {
@@ -92,6 +104,18 @@ func (r *RequestParams) Get(item string, default1 interface{}, types []reflect.K
 		return nil
 	}
 	return value
+}
+
+func (r *RequestParams) String(name string, defaultValue string) string {
+	return r.Get_str(name, defaultValue)
+}
+
+func (r *RequestParams) Int(name string, defaultValue int) int {
+	return r.Get_int(name, defaultValue)
+}
+
+func (r *RequestParams) Float(name string, defaultValue float64) float64 {
+	return r.Get_float(name, defaultValue)
 }
 
 // ReqItems converts a reqItems value (which may be []interface{} or []string)

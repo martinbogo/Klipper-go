@@ -160,6 +160,7 @@ type WebhookRequest interface {
 	String(name string, defaultValue string) string
 	Float(name string, defaultValue float64) float64
 	Int(name string, defaultValue int) int
+	GetParams() map[string]interface{}
 }
 
 type WebhookRegistry interface {

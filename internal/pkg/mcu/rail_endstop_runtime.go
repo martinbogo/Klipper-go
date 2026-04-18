@@ -4,11 +4,54 @@ import "fmt"
 
 type LegacyRailEndstopRegistrar func(endstop interface{}, name string)
 
+type LegacyRailEndstopStepperAdder interface {
+	AddStepper(stepper interface{})
+}
+
+type LegacyRailEndstopLegacyStepperAdder interface {
+	Add_stepper(stepper interface{})
+}
+
 type LegacyRailEndstopResult struct {
 	PinName string
 	Endstop interface{}
 	Entry   RailEndstopEntry
 	Created bool
+}
+
+func LegacyRailEndstopEntriesFromRawMap(raw map[string]interface{}) map[string]RailEndstopEntry {
+	entries := make(map[string]RailEndstopEntry, len(raw))
+	for pinName, rawEntry := range raw {
+		entry := rawEntry.(map[string]interface{})
+		entries[pinName] = RailEndstopEntry{
+			Endstop: entry["endstop"],
+			Invert:  entry["invert"],
+			Pullup:  entry["pullup"],
+		}
+	}
+	return entries
+}
+
+func RawLegacyRailEndstopEntry(entry RailEndstopEntry) map[string]interface{} {
+	return map[string]interface{}{
+		"endstop": entry.Endstop,
+		"invert":  entry.Invert,
+		"pullup":  entry.Pullup,
+	}
+}
+
+func AttachStepperToLegacyRailEndstop(endstop interface{}, stepper interface{}) bool {
+	adder, ok := endstop.(LegacyRailEndstopStepperAdder)
+	if ok {
+		adder.AddStepper(stepper)
+		return true
+	}
+	legacyAdder, ok := endstop.(LegacyRailEndstopLegacyStepperAdder)
+	if !ok {
+		return false
+	}
+	legacyAdder.Add_stepper(stepper)
+	return true
 }
 
 func ResolveLegacyRailEndstop(existing map[string]RailEndstopEntry, chipName string, pin interface{}, invert interface{}, pullup interface{}, stepperName string, createEndstop func() interface{}, registerEndstop LegacyRailEndstopRegistrar) (LegacyRailEndstopResult, error) {

@@ -4,7 +4,7 @@ type ProbeRunContext interface {
 	Core() *PrinterProbe
 	ToolheadPosition() []float64
 	Probe(speed float64) []float64
-	Move(coord []interface{}, speed float64)
+	Move(coord interface{}, speed float64)
 	BeginMultiProbe()
 	EndMultiProbe()
 }
@@ -22,7 +22,7 @@ func RunProbeSequence(context ProbeRunContext, command ProbeCommand) []float64 {
 	core := context.Core()
 	zero := 0.0
 	speed := command.Get_float("PROBE_SPEED", core.Speed, nil, nil, &zero, nil)
-	liftSpeed := liftSpeedFromCommand(command, core.LiftSpeed)
+	liftSpeed := LiftSpeedFromCommand(command, core.LiftSpeed)
 	one := 1
 	sampleCount := command.Get_int("SAMPLES", core.SampleCount, &one, nil)
 	sampleRetractDist := command.Get_float("SAMPLE_RETRACT_DIST", core.SampleRetractDist, nil, nil, &zero, nil)

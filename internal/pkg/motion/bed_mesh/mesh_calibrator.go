@@ -22,8 +22,92 @@ type PointGenerationResult struct {
 	Substitutions []PointSubstitution
 }
 
+type CalibrationFinalizeConfig struct {
+	MeshConfig             map[string]interface{}
+	RelativeReferenceIndex *int
+	Radius                 *float64
+	GeneratedPoints        [][]float64
+	Substitutions          []PointSubstitution
+}
+
+type CalibrationFinalizeResult struct {
+	CorrectedPositions [][]float64
+	ProbedMatrix       [][]float64
+	MeshParams         map[string]interface{}
+}
+
 func clonePoint(point []float64) []float64 {
 	return append([]float64(nil), point...)
+}
+
+func cloneMeshParams(meshConfig map[string]interface{}) map[string]interface{} {
+	params := make(map[string]interface{}, len(meshConfig)+4)
+	for key, item := range meshConfig {
+		params[key] = item
+	}
+	return params
+}
+
+func roundProbePositions(positions [][]float64) [][]float64 {
+	rounded := make([][]float64, 0, len(positions))
+	for _, pos := range positions {
+		if len(pos) < 3 {
+			rounded = append(rounded, append([]float64(nil), pos...))
+			continue
+		}
+		rounded = append(rounded, []float64{
+			math.Round(pos[0]*100) / 100,
+			math.Round(pos[1]*100) / 100,
+			pos[2],
+		})
+	}
+	return rounded
+}
+
+func FinalizeCalibration(offsets []float64, positions [][]float64, cfg CalibrationFinalizeConfig) (CalibrationFinalizeResult, error) {
+	result := CalibrationFinalizeResult{}
+	if len(positions) == 0 {
+		return result, fmt.Errorf("bed_mesh: no probe positions provided")
+	}
+
+	result.CorrectedPositions = roundProbePositions(positions)
+	result.MeshParams = cloneMeshParams(cfg.MeshConfig)
+	result.MeshParams["min_x"] = MinPoint(0, result.CorrectedPositions)[0] + offsets[0]
+	result.MeshParams["max_x"] = MaxPoint(0, result.CorrectedPositions)[0] + offsets[0]
+	result.MeshParams["min_y"] = MinPoint(1, result.CorrectedPositions)[1] + offsets[1]
+	result.MeshParams["max_y"] = MaxPoint(1, result.CorrectedPositions)[1] + offsets[1]
+
+	xCount, ok := result.MeshParams["x_count"].(int)
+	if !ok {
+		return result, fmt.Errorf("bed_mesh: invalid x_count mesh config type %T", result.MeshParams["x_count"])
+	}
+	yCount, ok := result.MeshParams["y_count"].(int)
+	if !ok {
+		return result, fmt.Errorf("bed_mesh: invalid y_count mesh config type %T", result.MeshParams["y_count"])
+	}
+
+	if len(cfg.Substitutions) > 0 {
+		corrected, err := ProcessFaultySubstitutions(cfg.GeneratedPoints, cfg.Substitutions, result.CorrectedPositions, offsets)
+		result.CorrectedPositions = corrected
+		if err != nil {
+			return result, err
+		}
+	}
+
+	probedMatrix, err := AssembleProbedMatrix(
+		result.CorrectedPositions,
+		offsets[2],
+		xCount,
+		yCount,
+		cfg.RelativeReferenceIndex,
+		cfg.Radius,
+	)
+	if err != nil {
+		return result, err
+	}
+
+	result.ProbedMatrix = probedMatrix
+	return result, nil
 }
 
 func GenerateProbePoints(radius *float64, origin []float64, meshMin []float64, meshMax []float64, xCount int, yCount int, faultyRegions []FaultyRegion) (PointGenerationResult, error) {
@@ -186,6 +270,18 @@ func GetAdjustedPoints(points [][]float64, substitutions []PointSubstitution) []
 	}
 	adjPts = append(adjPts, points[lastIndex:]...)
 	return adjPts
+}
+
+func FindProbePointIndex(points [][]float64, target Vec2) int {
+	for i, point := range points {
+		if len(point) < 2 {
+			continue
+		}
+		if Isclose(point[0], target.X, 1e-04, 1e-06) && Isclose(point[1], target.Y, 1e-04, 1e-06) {
+			return i
+		}
+	}
+	return -1
 }
 
 // AssembleProbedMatrix converts a sorted list of probe positions

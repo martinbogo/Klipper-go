@@ -15,6 +15,28 @@ func HandleToolheadWaitMoves(runtime ToolheadWaitRuntime, source PauseTimeSource
 	return WaitToolheadMoves(runtime.WaitMovesState(), source, config)
 }
 
+func ProcessToolheadMoveBatch(core *ToolheadCoreState, moves []*Move, sink MoveBatchSink, calcPrintTime func(), dripRuntime DripRuntime, dripSource DripTimeSource, completion DripCompletion, config ToolheadDripConfig) error {
+	if len(core.SpecialQueuingState) > 0 {
+		if core.SpecialQueuingState != "Drip" {
+			core.SpecialQueuingState = ""
+			core.NeedCheckPause = -1.0
+		}
+		if calcPrintTime != nil {
+			calcPrintTime()
+		}
+	}
+
+	nextMoveTime := QueueMoveBatch(core.PrintTime, moves, sink)
+	if core.SpecialQueuingState != "" {
+		if err := UpdateToolheadDripTime(dripRuntime, dripSource, completion, nextMoveTime, config); err != nil {
+			return err
+		}
+	}
+	dripRuntime.NoteMovequeueActivity(nextMoveTime+core.KinFlushDelay, true)
+	dripRuntime.AdvanceMoveTime(nextMoveTime)
+	return nil
+}
+
 type ToolheadDripMoveRuntime interface {
 	KinFlushDelay() float64
 	Dwell(delay float64)

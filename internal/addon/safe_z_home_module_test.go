@@ -183,7 +183,8 @@ func (self *fakeSafeZPrinter) LookupObject(name string, defaultValue interface{}
 	return defaultValue
 }
 
-func (self *fakeSafeZPrinter) RegisterEventHandler(event string, callback func([]interface{}) error) {}
+func (self *fakeSafeZPrinter) RegisterEventHandler(event string, callback func([]interface{}) error) {
+}
 
 func (self *fakeSafeZPrinter) SendEvent(event string, params []interface{}) {}
 
@@ -281,10 +282,10 @@ func TestLoadConfigSafeZHomingRegistersCommands(t *testing.T) {
 		lookup:  map[string]interface{}{"toolhead": toolhead},
 	}
 	config := &fakeSafeZConfig{
-		printer: printer,
-		strings: map[string]string{"home_xy_position": "100,200"},
-		floats:  map[string]float64{"speed": 50, "z_hop_speed": 15},
-		bools:   map[string]bool{},
+		printer:  printer,
+		strings:  map[string]string{"home_xy_position": "100,200"},
+		floats:   map[string]float64{"speed": 50, "z_hop_speed": 15},
+		bools:    map[string]bool{},
 		sections: map[string]bool{},
 	}
 
@@ -301,7 +302,7 @@ func TestLoadConfigSafeZHomingRegistersCommands(t *testing.T) {
 		commands = append(commands, command)
 	}
 	sort.Strings(commands)
-	if got, want := commands, []string{"G28", "H28"}; !reflect.DeepEqual(got, want) {
+	if got, want := commands, []string{"G28", "H28", homeAllAlias, homeXYAlias, homeZAlias}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands = %v, want %v", got, want)
 	}
 	if module.prevG28 == nil {
@@ -427,5 +428,187 @@ func TestSafeZHomingCmdH28SkipsAlreadyHomedXY(t *testing.T) {
 	}
 	if got, want := toolhead.manualMoves, [][]interface{}{{nil, nil, 2.0}, {11.0, 22.0}, {nil, nil, 2.0}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("manual moves = %v, want %v", got, want)
+	}
+}
+
+func TestSafeZHomingCmdH28XHomesYFirstWhenNeeded(t *testing.T) {
+	toolhead := &fakeSafeZToolhead{position: []float64{0, 0, 0, 0}, homedAxes: ""}
+	gcode := &fakeSafeZGCode{commands: map[string]func(printerpkg.Command) error{}}
+	gcode.commands["G28"] = func(gcmd printerpkg.Command) error {
+		params := gcmd.Parameters()
+		if _, ok := params["Y"]; ok && !strings.Contains(toolhead.homedAxes, "y") {
+			toolhead.homedAxes += "y"
+		}
+		if _, ok := params["X"]; ok && !strings.Contains(toolhead.homedAxes, "x") {
+			toolhead.homedAxes += "x"
+		}
+		return nil
+	}
+	printer := &fakeSafeZPrinter{
+		gcode:   gcode,
+		reactor: &fakeSafeZReactor{monotonic: 10},
+		lookup:  map[string]interface{}{"toolhead": toolhead},
+	}
+	config := &fakeSafeZConfig{
+		printer:  printer,
+		strings:  map[string]string{"home_xy_position": "10,20"},
+		floats:   map[string]float64{},
+		bools:    map[string]bool{},
+		sections: map[string]bool{},
+	}
+	module := LoadConfigSafeZHoming(config).(*SafeZHomingModule)
+
+	if err := module.cmdH28(&fakeSafeZCommand{strings: map[string]string{"X": "0"}}); err != nil {
+		t.Fatalf("cmdH28(X) unexpected error: %v", err)
+	}
+	if got, want := gcode.created, []map[string]string{{"X": "0", "Y": "0"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("created commands = %v, want %v", got, want)
+	}
+	if got, want := toolhead.homedAxes, "yx"; got != want {
+		t.Fatalf("homed axes = %q, want %q", got, want)
+	}
+}
+
+func TestSafeZHomingCmdG28XYStillPerformsZHop(t *testing.T) {
+	toolhead := &fakeSafeZToolhead{position: []float64{1, 2, 0, 0}, homedAxes: ""}
+	gcode := &fakeSafeZGCode{commands: map[string]func(printerpkg.Command) error{}}
+	gcode.commands["G28"] = func(gcmd printerpkg.Command) error {
+		params := gcmd.Parameters()
+		if _, ok := params["X"]; ok && !strings.Contains(toolhead.homedAxes, "x") {
+			toolhead.homedAxes += "x"
+		}
+		if _, ok := params["Y"]; ok && !strings.Contains(toolhead.homedAxes, "y") {
+			toolhead.homedAxes += "y"
+		}
+		return nil
+	}
+	printer := &fakeSafeZPrinter{
+		gcode:   gcode,
+		reactor: &fakeSafeZReactor{monotonic: 10},
+		lookup:  map[string]interface{}{"toolhead": toolhead},
+	}
+	config := &fakeSafeZConfig{
+		printer: printer,
+		strings: map[string]string{"home_xy_position": "10,20"},
+		floats: map[string]float64{
+			"z_hop":       5,
+			"z_hop_speed": 15,
+			"speed":       50,
+		},
+		bools:    map[string]bool{},
+		sections: map[string]bool{},
+	}
+	module := LoadConfigSafeZHoming(config).(*SafeZHomingModule)
+
+	if err := module.cmdG28(&fakeSafeZCommand{strings: map[string]string{"X": "0", "Y": "0"}}); err != nil {
+		t.Fatalf("cmdG28(XY) unexpected error: %v", err)
+	}
+	if got, want := toolhead.noteZNotHomed, 1; got != want {
+		t.Fatalf("NoteZNotHomed calls = %d, want %d", got, want)
+	}
+	if got, want := toolhead.manualMoves, [][]interface{}{{nil, nil, 5.0}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("manual moves = %v, want %v", got, want)
+	}
+	if got, want := gcode.created, []map[string]string{{"X": "0", "Y": "0"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("created commands = %v, want %v", got, want)
+	}
+	if got, want := toolhead.homedAxes, "xy"; got != want {
+		t.Fatalf("homed axes = %q, want %q", got, want)
+	}
+}
+
+func TestSafeZHomingCmdG28XHomesYFirstWhenNeeded(t *testing.T) {
+	toolhead := &fakeSafeZToolhead{position: []float64{1, 2, 0, 0}, homedAxes: ""}
+	gcode := &fakeSafeZGCode{commands: map[string]func(printerpkg.Command) error{}}
+	gcode.commands["G28"] = func(gcmd printerpkg.Command) error {
+		params := gcmd.Parameters()
+		if _, ok := params["Y"]; ok && !strings.Contains(toolhead.homedAxes, "y") {
+			toolhead.homedAxes += "y"
+		}
+		if _, ok := params["X"]; ok && !strings.Contains(toolhead.homedAxes, "x") {
+			toolhead.homedAxes += "x"
+		}
+		return nil
+	}
+	printer := &fakeSafeZPrinter{
+		gcode:   gcode,
+		reactor: &fakeSafeZReactor{monotonic: 10},
+		lookup:  map[string]interface{}{"toolhead": toolhead},
+	}
+	config := &fakeSafeZConfig{
+		printer: printer,
+		strings: map[string]string{"home_xy_position": "10,20"},
+		floats: map[string]float64{
+			"z_hop":       5,
+			"z_hop_speed": 15,
+			"speed":       50,
+		},
+		bools:    map[string]bool{},
+		sections: map[string]bool{},
+	}
+	module := LoadConfigSafeZHoming(config).(*SafeZHomingModule)
+
+	if err := module.cmdG28(&fakeSafeZCommand{strings: map[string]string{"X": "0"}}); err != nil {
+		t.Fatalf("cmdG28(X) unexpected error: %v", err)
+	}
+	if got, want := gcode.created, []map[string]string{{"X": "0", "Y": "0"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("created commands = %v, want %v", got, want)
+	}
+	if got, want := toolhead.homedAxes, "yx"; got != want {
+		t.Fatalf("homed axes = %q, want %q", got, want)
+	}
+}
+
+func TestSafeZHomingHomeXYAliasSkipsZHop(t *testing.T) {
+	toolhead := &fakeSafeZToolhead{position: []float64{1, 2, 0, 0}, homedAxes: ""}
+	gcode := &fakeSafeZGCode{commands: map[string]func(printerpkg.Command) error{}}
+	gcode.commands["G28"] = func(gcmd printerpkg.Command) error {
+		params := gcmd.Parameters()
+		if _, ok := params["X"]; ok && !strings.Contains(toolhead.homedAxes, "x") {
+			toolhead.homedAxes += "x"
+		}
+		if _, ok := params["Y"]; ok && !strings.Contains(toolhead.homedAxes, "y") {
+			toolhead.homedAxes += "y"
+		}
+		if _, ok := params["Z"]; ok && !strings.Contains(toolhead.homedAxes, "z") {
+			toolhead.homedAxes += "z"
+		}
+		return nil
+	}
+	printer := &fakeSafeZPrinter{
+		gcode:   gcode,
+		reactor: &fakeSafeZReactor{monotonic: 10},
+		lookup:  map[string]interface{}{"toolhead": toolhead},
+	}
+	config := &fakeSafeZConfig{
+		printer: printer,
+		strings: map[string]string{"home_xy_position": "10,20"},
+		floats: map[string]float64{
+			"z_hop":       5,
+			"z_hop_speed": 15,
+			"speed":       50,
+		},
+		bools:    map[string]bool{},
+		sections: map[string]bool{},
+	}
+	module := LoadConfigSafeZHoming(config).(*SafeZHomingModule)
+
+	if err := module.cmdHomeXY(&fakeSafeZCommand{}); err != nil {
+		t.Fatalf("cmdHomeXY() unexpected error: %v", err)
+	}
+	if got, want := gcode.created, []map[string]string{{"X": "0", "Y": "0"}, {"X": "0", "Y": "0"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("created commands = %v, want %v", got, want)
+	}
+	if got, want := toolhead.noteZNotHomed, 0; got != want {
+		t.Fatalf("NoteZNotHomed calls = %d, want %d", got, want)
+	}
+	if got, want := toolhead.manualMoves, [][]interface{}(nil); !reflect.DeepEqual(got, want) {
+		t.Fatalf("manual moves = %v, want %v", got, want)
+	}
+	if got, want := toolhead.homedAxes, "xy"; got != want {
+		t.Fatalf("homed axes = %q, want %q", got, want)
+	}
+	if handler := gcode.commands[homeXYAlias]; handler == nil {
+		t.Fatalf("expected %s command to be registered", homeXYAlias)
 	}
 }

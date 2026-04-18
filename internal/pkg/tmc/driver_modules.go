@@ -5,6 +5,8 @@ type DriverConfig interface {
 	TMC2660CurrentHelperConfig
 	ConfigFieldSource
 	Get(option string, default1 interface{}, noteValid bool) interface{}
+	Getchoice(option string, choices map[interface{}]interface{}, default1 interface{}, noteValid bool) interface{}
+	Get_name() string
 }
 
 type DriverCommandHelper interface {
@@ -20,6 +22,8 @@ type DriverAdapter interface {
 	AttachVirtualPin(config DriverConfig, mcuTMC RegisterAccess)
 	NewCommandHelper(config DriverConfig, mcuTMC RegisterAccess, currentHelper CurrentControl) DriverCommandHelper
 	ApplyStealthchop(config DriverConfig, mcuTMC RegisterAccess, tmcFrequency float64)
+	ApplyCoolstepThreshold(config DriverConfig, mcuTMC RegisterAccess, tmcFrequency float64)
+	ApplyHighVelocityThreshold(config DriverConfig, mcuTMC RegisterAccess, tmcFrequency float64)
 	NewTMC2660CurrentHelper(config DriverConfig, mcuTMC RegisterAccess) CurrentControl
 }
 
@@ -54,31 +58,40 @@ func NewTMC2130(config DriverConfig, adapter DriverAdapter) *DriverModule {
 	currentHelper := NewTMCCurrentHelper(config, mcuTMC)
 	cmdHelper := adapter.NewCommandHelper(config, mcuTMC, currentHelper)
 	cmdHelper.SetupRegisterDump(TMC2130ReadRegisters, nil)
-	ConfigureTMC2130(config, fields)
+	ApplyWaveTableDefaults(config, mcuTMC)
 	adapter.ApplyStealthchop(config, mcuTMC, TMC2130TMCFrequency)
+	adapter.ApplyCoolstepThreshold(config, mcuTMC, TMC2130TMCFrequency)
+	adapter.ApplyHighVelocityThreshold(config, mcuTMC, TMC2130TMCFrequency)
+	ConfigureTMC2130(config, fields)
 	return newDriverModule(cmdHelper)
 }
 
 func NewTMC2208(config DriverConfig, adapter DriverAdapter) *DriverModule {
 	fields := NewFieldHelper(TMC2208Fields, TMC2208SignedFields, TMC2208FieldFormatters, nil)
+	fields.Set_field("pdn_disable", true, nil, nil)
 	mcuTMC := adapter.NewUART(config, TMC2208Registers, fields, 0, TMC2208TMCFrequency)
 	currentHelper := NewTMCCurrentHelper(config, mcuTMC)
 	cmdHelper := adapter.NewCommandHelper(config, mcuTMC, currentHelper)
 	cmdHelper.SetupRegisterDump(TMC2208ReadRegisters, tmc2208ReadTranslate(fields))
-	ConfigureTMC2208(config, fields)
+	fields.Set_field("mstep_reg_select", true, nil, nil)
 	adapter.ApplyStealthchop(config, mcuTMC, TMC2208TMCFrequency)
+	ConfigureTMC2208(config, fields)
 	return newDriverModule(cmdHelper)
 }
 
 func NewTMC2209(config DriverConfig, adapter DriverAdapter) *DriverModule {
 	fields := NewFieldHelper(TMC2209Fields, TMC2208SignedFields, TMC2209FieldFormatters, nil)
+	fields.Set_field("pdn_disable", true, nil, nil)
+	fields.Set_field("senddelay", 2, nil, nil)
 	mcuTMC := adapter.NewUART(config, TMC2209Registers, fields, 3, TMC2209TMCFrequency)
 	adapter.AttachVirtualPin(config, mcuTMC)
 	currentHelper := NewTMCCurrentHelper(config, mcuTMC)
 	cmdHelper := adapter.NewCommandHelper(config, mcuTMC, currentHelper)
 	cmdHelper.SetupRegisterDump(TMC2209ReadRegisters, nil)
-	ConfigureTMC2209(config, fields)
+	fields.Set_field("mstep_reg_select", true, nil, nil)
 	adapter.ApplyStealthchop(config, mcuTMC, TMC2209TMCFrequency)
+	adapter.ApplyCoolstepThreshold(config, mcuTMC, TMC2209TMCFrequency)
+	ConfigureTMC2209(config, fields)
 	return newDriverModule(cmdHelper)
 }
 
@@ -86,7 +99,7 @@ func NewTMC2240(config DriverConfig, adapter DriverAdapter) *DriverModule {
 	fields := NewFieldHelper(TMC2240Fields, TMC2240SignedFields, TMC2240FieldFormatters, nil)
 	var mcuTMC RegisterAccess
 	if config.Get("uart_pin", nil, true) != nil {
-		mcuTMC = adapter.NewUART(config, TMC2240Registers, fields, 3, TMC2240TMCFrequency)
+		mcuTMC = adapter.NewUART(config, TMC2240Registers, fields, 7, TMC2240TMCFrequency)
 	} else {
 		mcuTMC = adapter.NewSPI(config, TMC2240Registers, fields)
 	}
@@ -95,8 +108,10 @@ func NewTMC2240(config DriverConfig, adapter DriverAdapter) *DriverModule {
 	cmdHelper := adapter.NewCommandHelper(config, mcuTMC, currentHelper)
 	cmdHelper.SetupRegisterDump(TMC2240ReadRegisters, nil)
 	ApplyWaveTableDefaults(config, mcuTMC)
-	ConfigureTMC2240(config, fields)
 	adapter.ApplyStealthchop(config, mcuTMC, TMC2240TMCFrequency)
+	adapter.ApplyCoolstepThreshold(config, mcuTMC, TMC2240TMCFrequency)
+	adapter.ApplyHighVelocityThreshold(config, mcuTMC, TMC2240TMCFrequency)
+	ConfigureTMC2240(config, fields)
 	return newDriverModule(cmdHelper)
 }
 
@@ -117,8 +132,11 @@ func NewTMC5160(config DriverConfig, adapter DriverAdapter) *DriverModule {
 	currentHelper := NewTMC5160CurrentHelper(config, mcuTMC)
 	cmdHelper := adapter.NewCommandHelper(config, mcuTMC, currentHelper)
 	cmdHelper.SetupRegisterDump(TMC5160ReadRegisters, nil)
-	ConfigureTMC5160(config, fields)
+	ApplyWaveTableDefaults(config, mcuTMC)
 	adapter.ApplyStealthchop(config, mcuTMC, TMC5160TMCFrequency)
+	adapter.ApplyCoolstepThreshold(config, mcuTMC, TMC5160TMCFrequency)
+	adapter.ApplyHighVelocityThreshold(config, mcuTMC, TMC5160TMCFrequency)
+	ConfigureTMC5160(config, fields)
 	return newDriverModule(cmdHelper)
 }
 

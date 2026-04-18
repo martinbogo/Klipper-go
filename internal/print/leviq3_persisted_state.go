@@ -2,6 +2,8 @@ package print
 
 import "time"
 
+const LeviQ3PersistentStateVariable = "leviq3_state"
+
 type LeviQ3PersistedStateRecord struct {
 	CurrentZOffset        float64          `json:"current_z_offset"`
 	LastHotbedTemp        float64          `json:"last_hotbed_temp,omitempty"`

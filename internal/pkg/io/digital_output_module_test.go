@@ -70,6 +70,14 @@ func (self *fakeDigitalWebhookRequest) Int(name string, defaultValue int) int {
 	return defaultValue
 }
 
+func (self *fakeDigitalWebhookRequest) GetParams() map[string]interface{} {
+	m := make(map[string]interface{})
+	for k, v := range self.ints {
+		m[k] = v
+	}
+	return m
+}
+
 type fakeDigitalWebhookRegistry struct {
 	paths              []string
 	requestHandlers    map[string]func(printerpkg.WebhookRequest) (interface{}, error)

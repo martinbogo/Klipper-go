@@ -1,5 +1,9 @@
 package vibration
 
+type lis2dw12SampleRuntime interface {
+	ExtractSamples(rawSamples []map[string]interface{}, bytesPerSample, samplesPerBlock, scaleDivisor int, decode func([]int) (int, int, int, bool)) [][]float64
+}
+
 // LIS2DW12 register addresses.
 var LIS2DW12Registers = map[string]int{
 	"REG_DEVID":     0x0F,
@@ -32,4 +36,13 @@ var LIS2DW12Info = map[string]interface{}{
 	"FREEFALL_ACCEL":   9.80665 * 1000.,
 	"SCALE_XY":         0.000244140625 * 9.80665 * 1000, // 1 / 4096 (at 3.3V) mg/LSB
 	"SCALE_Z":          0.000244140625 * 9.80665 * 1000, // 1 / 4096 (at 3.3V) mg/LSB
+}
+
+func ExtractLIS2DW12Samples(runtime lis2dw12SampleRuntime, rawSamples []map[string]interface{}) [][]float64 {
+	return runtime.ExtractSamples(rawSamples, int(LIS2DW12Clk["BYTES_PER_SAMPLE"]), int(LIS2DW12Clk["SAMPLES_PER_BLOCK"]), 4, func(d []int) (int, int, int, bool) {
+		rx := int(int16(d[0]&0xfc | ((d[3] & 0xff) << 8)))
+		ry := int(int16(d[1]&0xfc | ((d[4] & 0xff) << 8)))
+		rz := int(int16(d[2]&0xfc | ((d[5] & 0xff) << 8)))
+		return rx, ry, rz, true
+	})
 }

@@ -3,9 +3,9 @@ package motion
 import "goklipper/internal/pkg/chelper"
 
 type ManualStepperCore struct {
-	nextCmdTime        float64
-	trapq              interface{}
-	trapqAppend        func(tq interface{}, print_time, accel_t, cruise_t, decel_t,
+	nextCmdTime float64
+	trapq       interface{}
+	trapqAppend func(tq interface{}, print_time, accel_t, cruise_t, decel_t,
 		start_pos_x, start_pos_y, start_pos_z, axes_r_x, axes_r_y,
 		axes_r_z, start_v, cruise_v, accel float64)
 	trapqFinalizeMoves func(interface{}, float64, float64)

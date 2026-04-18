@@ -8,6 +8,24 @@ import (
 	"goklipper/common/utils/sys"
 	"math"
 	"strings"
+	"sync"
+)
+
+const errorCheckMaxTransientUARTReadFailures = 5
+
+// After homing ends, shared-UART traffic (phase sync, status reads, delayed
+// register verification) can remain elevated for several seconds. Keep
+// transient UART read failures out of the shutdown budget during this cooldown
+// period.
+const errorCheckPostHomingTransientGraceSeconds = 30.0
+
+// pollStaggerInterval spreads concurrent drivers across the 1-second poll cycle
+// so their DRV_STATUS/GSTAT reads don't fire simultaneously on the shared UART.
+const pollStaggerInterval = 0.333
+
+var (
+	pollStartMu    sync.Mutex
+	pollStartCount int
 )
 
 type ErrorCheckReactor interface {
@@ -15,6 +33,29 @@ type ErrorCheckReactor interface {
 	Pause(waketime float64) float64
 	RegisterTimer(callback func(float64) float64, waketime float64) interface{}
 	UnregisterTimer(timer interface{})
+}
+
+type ErrorCheckReactorFuncs struct {
+	MonotonicFunc       func() float64
+	PauseFunc           func(float64) float64
+	RegisterTimerFunc   func(func(float64) float64, float64) interface{}
+	UnregisterTimerFunc func(interface{})
+}
+
+func (funcs ErrorCheckReactorFuncs) Monotonic() float64 {
+	return funcs.MonotonicFunc()
+}
+
+func (funcs ErrorCheckReactorFuncs) Pause(waketime float64) float64 {
+	return funcs.PauseFunc(waketime)
+}
+
+func (funcs ErrorCheckReactorFuncs) RegisterTimer(callback func(float64) float64, waketime float64) interface{} {
+	return funcs.RegisterTimerFunc(callback, waketime)
+}
+
+func (funcs ErrorCheckReactorFuncs) UnregisterTimer(timer interface{}) {
+	funcs.UnregisterTimerFunc(timer)
 }
 
 type ShutdownHandler func(msg string)
@@ -45,12 +86,32 @@ type ErrorCheckRuntime struct {
 	drvStatusRegInfo errorCheckRegisterInfo
 	adcTemp          *int64
 	adcTempReg       string
+	readFailureCount int
+	pollOffset       float64
+	homingActive     bool
+	homingGraceUntil float64
+}
+
+func (self *ErrorCheckRuntime) isHomingOrGrace(eventtime float64) bool {
+	return self.homingActive || eventtime < self.homingGraceUntil
+}
+
+func isTransientUARTReadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.HasPrefix(err.Error(), "Unable to read tmc uart")
 }
 
 func NewErrorCheckRuntime(driverName string, stepperName string, mcuTMC RegisterAccess, reactor ErrorCheckReactor, shutdown ShutdownHandler, registerMonitor MonitorRegistrar) *ErrorCheckRuntime {
 	if shutdown == nil {
 		shutdown = func(string) {}
 	}
+	pollStartMu.Lock()
+	idx := pollStartCount
+	pollStartCount++
+	pollStartMu.Unlock()
+
 	self := &ErrorCheckRuntime{
 		reactor:     reactor,
 		shutdown:    shutdown,
@@ -59,6 +120,7 @@ func NewErrorCheckRuntime(driverName string, stepperName string, mcuTMC Register
 		fields:      mcuTMC.Get_fields(),
 		clearGSTAT:  true,
 		irunField:   "irun",
+		pollOffset:  float64(idx) * pollStaggerInterval,
 	}
 	self.checkTimer = reactor.RegisterTimer(self.doPeriodicCheck, constants.NEVER)
 
@@ -168,15 +230,49 @@ func (self *ErrorCheckRuntime) queryTemperature() (err error) {
 	return nil
 }
 
+// handleTransientUARTReadError handles a transient UART read error in the periodic
+// check loop. During homing the shared UART bus is saturated by stall-detection
+// register writes for all drivers, so individual DRV_STATUS poll failures are
+// expected and must not consume the shutdown failure budget. Returns (nextWake,
+// true) when the caller should reschedule without counting a failure, or
+// (0, false) when the threshold has been exceeded and shutdown should be called.
+func (self *ErrorCheckRuntime) handleTransientUARTReadError(eventtime float64) (float64, bool) {
+	if self.isHomingOrGrace(eventtime) {
+		return eventtime + 1, true
+	}
+	self.readFailureCount++
+	logger.Infof("TMC %s transient DRV_STATUS read failure %d/%d", self.stepperName, self.readFailureCount, errorCheckMaxTransientUARTReadFailures)
+	if self.readFailureCount < errorCheckMaxTransientUARTReadFailures {
+		return eventtime + 1, true
+	}
+	return 0, false
+}
+
 func (self *ErrorCheckRuntime) doPeriodicCheck(eventtime float64) float64 {
 	defer sys.CatchPanic()
+	if self.isHomingOrGrace(eventtime) {
+		// Avoid adding more traffic to the shared UART while homing is active
+		// or immediately after homing. Polling during this period mainly yields
+		// transport noise and can interfere with motion-critical transactions.
+		return eventtime + 1
+	}
 	if _, err := self.queryRegister(&self.drvStatusRegInfo, false); err != nil {
+		if isTransientUARTReadError(err) {
+			if next, ok := self.handleTransientUARTReadError(eventtime); ok {
+				return next
+			}
+		}
 		self.shutdown(err.Error())
 		return constants.NEVER
 	}
 
 	if self.gstatRegInfo != nil {
 		if _, err := self.queryRegister(self.gstatRegInfo, false); err != nil {
+			if isTransientUARTReadError(err) {
+				if next, ok := self.handleTransientUARTReadError(eventtime); ok {
+					return next
+				}
+			}
 			self.shutdown(err.Error())
 			return constants.NEVER
 		}
@@ -187,7 +283,24 @@ func (self *ErrorCheckRuntime) doPeriodicCheck(eventtime float64) float64 {
 			return constants.NEVER
 		}
 	}
+	self.readFailureCount = 0
 	return eventtime + 1
+}
+
+// SetHomingActive marks whether a homing move is in progress. When true,
+// transient UART read failures in the periodic check loop are silently
+// suppressed (not counted toward the shutdown threshold) because the shared
+// bitbang UART is saturated by stall-detection register writes. The failure
+// counter is reset both when homing starts and when it ends so that neither
+// pre-homing nor during-homing failures pollute the post-homing budget.
+func (self *ErrorCheckRuntime) SetHomingActive(active bool) {
+	self.homingActive = active
+	if active {
+		self.homingGraceUntil = 0
+	} else {
+		self.homingGraceUntil = self.reactor.Monotonic() + errorCheckPostHomingTransientGraceSeconds
+	}
+	self.readFailureCount = 0
 }
 
 func (self *ErrorCheckRuntime) StopChecks() {
@@ -202,8 +315,21 @@ func (self *ErrorCheckRuntime) StartChecks() bool {
 	if self.checkTimer != nil {
 		self.StopChecks()
 	}
+	self.readFailureCount = 0
+	curtime := self.reactor.Monotonic()
+	if self.isHomingOrGrace(curtime) {
+		// During homing and the immediate post-homing grace window, avoid
+		// enable-time UART reads. Shared-UART traffic is elevated in this
+		// period and startup reads can fail transiently, causing false
+		// shutdowns before motion-critical traffic settles.
+		self.checkTimer = self.reactor.RegisterTimer(self.doPeriodicCheck, curtime+1.+self.pollOffset)
+		return false
+	}
+	// Match Python: if the initial DRV_STATUS read fails, call shutdown and
+	// return immediately — do NOT register the periodic timer.
 	if _, err := self.queryRegister(&self.drvStatusRegInfo, false); err != nil {
 		self.shutdown(err.Error())
+		return false
 	}
 
 	clearedFlags := int64(0)
@@ -211,13 +337,12 @@ func (self *ErrorCheckRuntime) StartChecks() bool {
 		cleared, err := self.queryRegister(self.gstatRegInfo, self.clearGSTAT)
 		if err != nil {
 			self.shutdown(err.Error())
-		} else {
-			clearedFlags = cleared
+			return false
 		}
+		clearedFlags = cleared
 	}
 
-	curtime := self.reactor.Monotonic()
-	self.checkTimer = self.reactor.RegisterTimer(self.doPeriodicCheck, curtime+1.)
+	self.checkTimer = self.reactor.RegisterTimer(self.doPeriodicCheck, curtime+1.+self.pollOffset)
 
 	if clearedFlags != 0 {
 		if gstatFields, ok := self.fields.All_fields()["GSTAT"]; ok {

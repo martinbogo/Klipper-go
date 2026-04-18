@@ -11,7 +11,11 @@ type fakeCS1237Command struct {
 	sends [][3]interface{}
 }
 
-func (self *fakeCS1237Command) Send(args []int64, minclock int64, reqclock int64) {
+func (self *fakeCS1237Command) Send(data interface{}, minclock int64, reqclock int64) {
+	args, ok := data.([]int64)
+	if !ok {
+		panic(fmt.Sprintf("unexpected command payload type %T", data))
+	}
 	copyArgs := append([]int64{}, args...)
 	self.sends = append(self.sends, [3]interface{}{copyArgs, minclock, reqclock})
 }
@@ -71,7 +75,7 @@ func (self *fakeCS1237PinRegistry) LookupPin(pinDesc string, canInvert bool, can
 		return result
 	}
 	return map[string]interface{}{"chip_name": "mcu", "pin": pinDesc}
-	}
+}
 
 type fakeCS1237GCode struct {
 	scripts []string
@@ -83,10 +87,10 @@ func (self *fakeCS1237GCode) IsTraditionalGCode(cmd string) bool { return false 
 func (self *fakeCS1237GCode) RunScriptFromCommand(script string) {
 	self.scripts = append(self.scripts, script)
 }
-func (self *fakeCS1237GCode) RunScript(script string)                          {}
-func (self *fakeCS1237GCode) IsBusy() bool                                     { return false }
-func (self *fakeCS1237GCode) Mutex() printerpkg.Mutex                          { return nil }
-func (self *fakeCS1237GCode) RespondInfo(msg string, log bool)                 {}
+func (self *fakeCS1237GCode) RunScript(script string)          {}
+func (self *fakeCS1237GCode) IsBusy() bool                     { return false }
+func (self *fakeCS1237GCode) Mutex() printerpkg.Mutex          { return nil }
+func (self *fakeCS1237GCode) RespondInfo(msg string, log bool) {}
 func (self *fakeCS1237GCode) ReplaceCommand(cmd string, handler func(printerpkg.Command) error, whenNotReady bool, desc string) func(printerpkg.Command) error {
 	return nil
 }
@@ -185,18 +189,18 @@ func (self *fakeCS1237Printer) RegisterEventHandler(event string, callback func(
 	self.eventHandlers[event] = callback
 }
 
-func (self *fakeCS1237Printer) SendEvent(event string, params []interface{})                    {}
-func (self *fakeCS1237Printer) CurrentExtruderName() string                                      { return "extruder" }
-func (self *fakeCS1237Printer) AddObject(name string, obj interface{}) error                     { return nil }
-func (self *fakeCS1237Printer) LookupObjects(module string) []interface{}                        { return nil }
-func (self *fakeCS1237Printer) HasStartArg(name string) bool                                     { return false }
-func (self *fakeCS1237Printer) LookupHeater(name string) printerpkg.HeaterRuntime                { return nil }
-func (self *fakeCS1237Printer) TemperatureSensors() printerpkg.TemperatureSensorRegistry         { return nil }
-func (self *fakeCS1237Printer) InvokeShutdown(msg string)                                        {}
-func (self *fakeCS1237Printer) IsShutdown() bool                                                 { return false }
-func (self *fakeCS1237Printer) StepperEnable() printerpkg.StepperEnableRuntime                   { return nil }
-func (self *fakeCS1237Printer) GCodeMove() printerpkg.MoveTransformController                    { return nil }
-func (self *fakeCS1237Printer) Webhooks() printerpkg.WebhookRegistry                             { return nil }
+func (self *fakeCS1237Printer) SendEvent(event string, params []interface{})             {}
+func (self *fakeCS1237Printer) CurrentExtruderName() string                              { return "extruder" }
+func (self *fakeCS1237Printer) AddObject(name string, obj interface{}) error             { return nil }
+func (self *fakeCS1237Printer) LookupObjects(module string) []interface{}                { return nil }
+func (self *fakeCS1237Printer) HasStartArg(name string) bool                             { return false }
+func (self *fakeCS1237Printer) LookupHeater(name string) printerpkg.HeaterRuntime        { return nil }
+func (self *fakeCS1237Printer) TemperatureSensors() printerpkg.TemperatureSensorRegistry { return nil }
+func (self *fakeCS1237Printer) InvokeShutdown(msg string)                                {}
+func (self *fakeCS1237Printer) IsShutdown() bool                                         { return false }
+func (self *fakeCS1237Printer) StepperEnable() printerpkg.StepperEnableRuntime           { return nil }
+func (self *fakeCS1237Printer) GCodeMove() printerpkg.MoveTransformController            { return nil }
+func (self *fakeCS1237Printer) Webhooks() printerpkg.WebhookRegistry                     { return nil }
 
 func (self *fakeCS1237Printer) LookupMCU(name string) printerpkg.MCURuntime {
 	if value, ok := self.mcus[name]; ok {
@@ -226,10 +230,10 @@ func (self *fakeCS1237Config) String(option string, defaultValue string, noteVal
 	}
 	return defaultValue
 }
-func (self *fakeCS1237Config) Bool(option string, defaultValue bool) bool      { return defaultValue }
+func (self *fakeCS1237Config) Bool(option string, defaultValue bool) bool        { return defaultValue }
 func (self *fakeCS1237Config) Float(option string, defaultValue float64) float64 { return defaultValue }
-func (self *fakeCS1237Config) OptionalFloat(option string) *float64            { return nil }
-func (self *fakeCS1237Config) LoadObject(section string) interface{}           { return nil }
+func (self *fakeCS1237Config) OptionalFloat(option string) *float64              { return nil }
+func (self *fakeCS1237Config) LoadObject(section string) interface{}             { return nil }
 func (self *fakeCS1237Config) LoadTemplate(module string, option string, defaultValue string) printerpkg.Template {
 	return nil
 }
@@ -246,8 +250,8 @@ func TestLoadConfigCS1237RegistersCallbacksAndBuildsCommands(t *testing.T) {
 		"PB3": {"chip_name": "mcu", "pin": "gpio13"},
 	}}
 	printer := &fakeCS1237Printer{
-		lookup: map[string]interface{}{"pins": pins, "toolhead": &fakeCS1237Toolhead{}},
-		mcus:   map[string]printerpkg.MCURuntime{"mcu": mcu},
+		lookup:  map[string]interface{}{"pins": pins, "toolhead": &fakeCS1237Toolhead{}},
+		mcus:    map[string]printerpkg.MCURuntime{"mcu": mcu},
 		reactor: &fakeCS1237Reactor{monotonic: 5.0},
 		gcode:   &fakeCS1237GCode{},
 	}
@@ -321,8 +325,8 @@ func TestCS1237ModuleHandlesQueriesAndEvents(t *testing.T) {
 		"PB3": {"chip_name": "mcu", "pin": "gpio13"},
 	}}
 	printer := &fakeCS1237Printer{
-		lookup: map[string]interface{}{"pins": pins, "toolhead": toolhead},
-		mcus:   map[string]printerpkg.MCURuntime{"mcu": mcu},
+		lookup:  map[string]interface{}{"pins": pins, "toolhead": toolhead},
+		mcus:    map[string]printerpkg.MCURuntime{"mcu": mcu},
 		reactor: reactor,
 		gcode:   gcode,
 	}

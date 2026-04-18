@@ -99,9 +99,10 @@ func (self *fakeProbePointsRuntime) LookupAutomaticProbe() ProbePointsAutomaticP
 	return self.automaticProbe
 }
 
-func (self *fakeProbePointsRuntime) Move(coord []interface{}, speed float64) {
-	copyCoord := make([]interface{}, len(coord))
-	copy(copyCoord, coord)
+func (self *fakeProbePointsRuntime) Move(coord interface{}, speed float64) {
+	typed := coord.([]interface{})
+	copyCoord := make([]interface{}, len(typed))
+	copy(copyCoord, typed)
 	self.moves = append(self.moves, copyCoord)
 	self.speeds = append(self.speeds, speed)
 }

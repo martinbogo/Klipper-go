@@ -1,6 +1,9 @@
 package homing
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 type fakeCompletion struct {
 	result interface{}
@@ -284,6 +287,21 @@ func TestMoveCheckNoMovementHonorsDebugInput(t *testing.T) {
 	}
 }
 
+func TestMoveCalcEndstopRateClampsWhenNoSteps(t *testing.T) {
+	stepper := &fakeStepper{name: "x", stepDist: 1, currentMCUPos: 0, pastPositions: map[float64]int{}}
+	toolhead := &fakeDripToolhead{
+		position:   []float64{0, 0, 0, 0},
+		kinematics: &fakeKinematics{steppers: []Stepper{stepper}},
+	}
+	endstop := &fakeEndstop{steppers: []Stepper{stepper}}
+	move := NewMove(&fakeReactor{}, toolhead, []NamedEndstop{{Endstop: endstop, Name: "x_endstop"}}, false)
+
+	rate := move.CalcEndstopRate(endstop, []float64{0, 0, 0, 0}, 25)
+	if rate != 0.001 {
+		t.Fatalf("expected clamp rate 0.001 when no step movement, got %v", rate)
+	}
+}
+
 func TestStateHomeRailsAppliesStepperAdjustmentsAfterCallback(t *testing.T) {
 	stepper := &fakeStepper{name: "x", stepDist: 1, commandedPosition: 10}
 	toolhead := &fakeDripToolhead{
@@ -324,8 +342,9 @@ func TestStateHomeRailsAppliesStepperAdjustmentsAfterCallback(t *testing.T) {
 			}
 			return move
 		},
-		func() {
+		func() error {
 			state.SetStepperAdjustment("x", 2)
+			return nil
 		},
 	)
 	if err != nil {
@@ -337,10 +356,60 @@ func TestStateHomeRailsAppliesStepperAdjustmentsAfterCallback(t *testing.T) {
 	if got := state.GetTriggerPosition("x"); got != 42 {
 		t.Fatalf("expected trigger position 42, got %.1f", got)
 	}
-	if len(toolhead.setPositionCalls) != 3 {
-		t.Fatalf("expected start, home, and adjusted positions, got %#v", toolhead.setPositionCalls)
+	if len(toolhead.setPositionCalls) != 2 {
+		t.Fatalf("expected start and adjusted positions, got %#v", toolhead.setPositionCalls)
 	}
 	if last := toolhead.setPositionCalls[len(toolhead.setPositionCalls)-1]; last[0] != 12 {
 		t.Fatalf("expected adjusted X position 12, got %#v", last)
+	}
+}
+
+func TestStateHomeRailsPropagatesAfterHomeErrorBeforeAdjustments(t *testing.T) {
+	stepper := &fakeStepper{name: "x", stepDist: 1, commandedPosition: 10}
+	toolhead := &fakeDripToolhead{
+		position:     []float64{0, 0, 0, 0},
+		kinematics:   &fakeKinematics{steppers: []Stepper{stepper}},
+		lastMoveTime: 2.0,
+	}
+	state := NewState(toolhead)
+	rail := &fakeRail{
+		endstops: []NamedEndstop{{Endstop: &fakeEndstop{}, Name: "x_endstop"}},
+		info: &RailHomingInfo{
+			Speed:             50,
+			PositionEndstop:   10,
+			RetractSpeed:      20,
+			RetractDist:       0,
+			PositiveDir:       false,
+			SecondHomingSpeed: 25,
+		},
+	}
+	move := &fakeMoveExecutor{
+		triggerPos:  []float64{10, 0, 0, 0},
+		triggerTime: 1.25,
+		stepperPosition: []*StepperPosition{{
+			Stepper:     stepper,
+			EndstopName: "x_endstop",
+			StepperName: "x",
+			TrigPos:     42,
+		}},
+	}
+
+	err := state.HomeRailsWithPositions(
+		[]Rail{rail},
+		[]interface{}{float64(-5), nil, nil, nil},
+		[]interface{}{float64(10), nil, nil, nil},
+		func(endstops []NamedEndstop) MoveExecutor {
+			return move
+		},
+		func() error {
+			state.SetStepperAdjustment("x", 2)
+			return fmt.Errorf("home_rails_end failed")
+		},
+	)
+	if err == nil || err.Error() != "home_rails_end failed" {
+		t.Fatalf("expected afterHome error, got %v", err)
+	}
+	if len(toolhead.setPositionCalls) != 1 {
+		t.Fatalf("expected no adjusted position after callback error, got %#v", toolhead.setPositionCalls)
 	}
 }

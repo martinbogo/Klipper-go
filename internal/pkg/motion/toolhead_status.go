@@ -41,6 +41,30 @@ func BuildToolheadStats(snapshot ToolheadStatsSnapshot) ToolheadStatsResult {
 	}
 }
 
+type ToolheadStatsRuntime interface {
+	PrintTime() float64
+	LastFlushTime() float64
+	EstimatedPrintTime(eventtime float64) float64
+	PrintStall() float64
+	SpecialQueuingState() string
+	SetClearHistoryTime(value float64)
+	CheckActiveDrivers(maxQueueTime float64, eventtime float64)
+}
+
+func BuildToolheadStatsReport(runtime ToolheadStatsRuntime, eventtime float64, moveHistoryExpire float64) (bool, string) {
+	stats := BuildToolheadStats(ToolheadStatsSnapshot{
+		PrintTime:           runtime.PrintTime(),
+		LastFlushTime:       runtime.LastFlushTime(),
+		EstimatedPrintTime:  runtime.EstimatedPrintTime(eventtime),
+		PrintStall:          runtime.PrintStall(),
+		MoveHistoryExpire:   moveHistoryExpire,
+		SpecialQueuingState: runtime.SpecialQueuingState(),
+	})
+	runtime.CheckActiveDrivers(stats.MaxQueueTime, eventtime)
+	runtime.SetClearHistoryTime(stats.ClearHistoryTime)
+	return stats.IsActive, stats.Summary
+}
+
 type ToolheadBusyState struct {
 	PrintTime          float64
 	EstimatedPrintTime float64
@@ -53,6 +77,20 @@ func BuildToolheadBusyState(printTime float64, estimatedPrintTime float64, looka
 		EstimatedPrintTime: estimatedPrintTime,
 		LookaheadEmpty:     lookaheadEmpty,
 	}
+}
+
+type ToolheadBusyRuntime interface {
+	PrintTime() float64
+	EstimatedPrintTime(eventtime float64) float64
+	LookaheadEmpty() bool
+}
+
+func BuildToolheadBusyReport(runtime ToolheadBusyRuntime, eventtime float64) ToolheadBusyState {
+	return BuildToolheadBusyState(
+		runtime.PrintTime(),
+		runtime.EstimatedPrintTime(eventtime),
+		runtime.LookaheadEmpty(),
+	)
 }
 
 type ToolheadStatusSnapshot struct {
@@ -77,9 +115,52 @@ func BuildToolheadStatus(snapshot ToolheadStatusSnapshot) map[string]interface{}
 	status["position"] = append([]float64{}, snapshot.CommandedPosition...)
 	status["max_velocity"] = snapshot.MaxVelocity
 	status["max_accel"] = snapshot.MaxAccel
+	status["minimum_cruise_ratio"] = CalcMinimumCruiseRatio(snapshot.MaxAccel, snapshot.RequestedAccelToDecel)
 	status["max_accel_to_decel"] = snapshot.RequestedAccelToDecel
 	status["square_corner_velocity"] = snapshot.SquareCornerVelocity
 	return status
+}
+
+type ToolheadStatusRuntime interface {
+	KinematicsStatus(eventtime float64) map[string]interface{}
+	PrintTime() float64
+	EstimatedPrintTime(eventtime float64) float64
+	PrintStall() float64
+	ExtruderName() string
+	CommandedPosition() []float64
+	VelocitySettings() ToolheadVelocitySettings
+}
+
+func BuildToolheadStatusReport(runtime ToolheadStatusRuntime, eventtime float64) map[string]interface{} {
+	velocitySettings := runtime.VelocitySettings()
+	return BuildToolheadStatus(ToolheadStatusSnapshot{
+		KinematicsStatus:      runtime.KinematicsStatus(eventtime),
+		PrintTime:             runtime.PrintTime(),
+		EstimatedPrintTime:    runtime.EstimatedPrintTime(eventtime),
+		PrintStall:            runtime.PrintStall(),
+		ExtruderName:          runtime.ExtruderName(),
+		CommandedPosition:     runtime.CommandedPosition(),
+		MaxVelocity:           velocitySettings.MaxVelocity,
+		MaxAccel:              velocitySettings.MaxAccel,
+		RequestedAccelToDecel: velocitySettings.RequestedAccelToDecel,
+		SquareCornerVelocity:  velocitySettings.SquareCornerVelocity,
+	})
+}
+
+type ToolheadHomingStatusRuntime interface {
+	KinematicsStatus(eventtime float64) map[string]interface{}
+}
+
+func ToolheadHomedAxes(runtime ToolheadHomingStatusRuntime, eventtime float64) string {
+	status := runtime.KinematicsStatus(eventtime)
+	axes, _ := status["homed_axes"].(string)
+	return axes
+}
+
+func NoteToolheadZNotHomed(kinematics interface{}) {
+	if kin, ok := kinematics.(interface{ Note_z_not_homed() }); ok {
+		kin.Note_z_not_homed()
+	}
 }
 
 func cloneToolheadStatus(status map[string]interface{}) map[string]interface{} {

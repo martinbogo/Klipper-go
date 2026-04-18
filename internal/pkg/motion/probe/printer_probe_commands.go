@@ -17,7 +17,7 @@ type ProbeCommandContext interface {
 	QueryEndstop(printTime float64) int
 	Probe(speed float64) []float64
 	RunProbeCommand(command ProbeCommand) []float64
-	Move(coord []interface{}, speed float64)
+	Move(coord interface{}, speed float64)
 	BeginMultiProbe()
 	EndMultiProbe()
 	EnsureNoManualProbe()
@@ -27,7 +27,7 @@ type ProbeCommandContext interface {
 	RespondInfo(msg string, log bool)
 }
 
-func liftSpeedFromCommand(command ProbeCommand, defaultValue float64) float64 {
+func LiftSpeedFromCommand(command ProbeCommand, defaultValue float64) float64 {
 	zero := 0.0
 	return command.Get_float("LIFT_SPEED", defaultValue, nil, nil, &zero, nil)
 }
@@ -82,7 +82,7 @@ func HandleProbeAccuracyCommand(context ProbeCommandContext, command ProbeComman
 	zero := 0.0
 	one := 1
 	speed := command.Get_float("PROBE_SPEED", core.Speed, nil, nil, &zero, nil)
-	liftSpeed := liftSpeedFromCommand(command, core.LiftSpeed)
+	liftSpeed := LiftSpeedFromCommand(command, core.LiftSpeed)
 	sampleCount := command.Get_int("SAMPLES", 10, &one, nil)
 	sampleRetractDist := command.Get_float("SAMPLE_RETRACT_DIST", core.SampleRetractDist, nil, nil, &zero, nil)
 	pos := context.ToolheadPosition()
@@ -112,7 +112,7 @@ func HandleProbeAccuracyCommand(context ProbeCommandContext, command ProbeComman
 
 func HandleProbeCalibrateCommand(context ProbeCommandContext, command ProbeCommand) error {
 	core := context.Core()
-	liftSpeed := liftSpeedFromCommand(command, core.LiftSpeed)
+	liftSpeed := LiftSpeedFromCommand(command, core.LiftSpeed)
 	context.EnsureNoManualProbe()
 	curpos := context.RunProbeCommand(command)
 	core.SetProbeCalibrateZ(curpos[2])

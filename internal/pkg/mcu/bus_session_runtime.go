@@ -13,6 +13,29 @@ type BusNameResolver interface {
 	ReservePin(pin string, owner string)
 }
 
+type BusNameResolverFuncs struct {
+	EnumerationsFunc func() map[string]interface{}
+	ConstantsFunc    func() map[string]interface{}
+	MCUNameFunc      func() string
+	ReservePinFunc   func(pin string, owner string)
+}
+
+func (funcs BusNameResolverFuncs) Enumerations() map[string]interface{} {
+	return funcs.EnumerationsFunc()
+}
+
+func (funcs BusNameResolverFuncs) Constants() map[string]interface{} {
+	return funcs.ConstantsFunc()
+}
+
+func (funcs BusNameResolverFuncs) MCUName() string {
+	return funcs.MCUNameFunc()
+}
+
+func (funcs BusNameResolverFuncs) ReservePin(pin string, owner string) {
+	funcs.ReservePinFunc(pin, owner)
+}
+
 func ResolveBusName(resolver BusNameResolver, param string, bus *string) string {
 	busName := ""
 	if bus != nil {
@@ -62,15 +85,59 @@ type BusCommandSender interface {
 	Send(data interface{}, minclock, reqclock int64)
 }
 
+type BusCommandSenderAdapter struct {
+	SendFunc func(data interface{}, minclock, reqclock int64)
+	Raw      interface{}
+}
+
+func (adapter *BusCommandSenderAdapter) Send(data interface{}, minclock, reqclock int64) {
+	adapter.SendFunc(data, minclock, reqclock)
+}
+
 type BusQuerySender interface {
 	Send(data interface{}, minclock, reqclock int64) interface{}
 	SendWithPreface(preface BusCommandSender, prefaceData interface{}, data interface{}, minclock, reqclock int64) interface{}
+}
+
+type BusQuerySenderAdapter struct {
+	SendFunc            func(data interface{}, minclock, reqclock int64) interface{}
+	SendWithPrefaceFunc func(prefaceRaw interface{}, prefaceData interface{}, data interface{}, minclock, reqclock int64) interface{}
+}
+
+func (adapter *BusQuerySenderAdapter) Send(data interface{}, minclock, reqclock int64) interface{} {
+	return adapter.SendFunc(data, minclock, reqclock)
+}
+
+func (adapter *BusQuerySenderAdapter) SendWithPreface(preface BusCommandSender, prefaceData interface{}, data interface{}, minclock, reqclock int64) interface{} {
+	prefaceAdapter, ok := preface.(*BusCommandSenderAdapter)
+	if !ok {
+		panic(fmt.Errorf("unexpected preface sender type %T", preface))
+	}
+	return adapter.SendWithPrefaceFunc(prefaceAdapter.Raw, prefaceData, data, minclock, reqclock)
 }
 
 type BusCommandOwner interface {
 	AddConfigCmd(cmd string, isInit, onRestart bool)
 	LookupCommand(msgformat string, cmdQueue interface{}) (BusCommandSender, error)
 	LookupQueryCommand(msgformat string, respformat string, oid int, cmdQueue interface{}, isAsync bool) BusQuerySender
+}
+
+type BusCommandOwnerFuncs struct {
+	AddConfigCmdFunc       func(cmd string, isInit, onRestart bool)
+	LookupCommandFunc      func(msgformat string, cmdQueue interface{}) (BusCommandSender, error)
+	LookupQueryCommandFunc func(msgformat string, respformat string, oid int, cmdQueue interface{}, isAsync bool) BusQuerySender
+}
+
+func (funcs BusCommandOwnerFuncs) AddConfigCmd(cmd string, isInit, onRestart bool) {
+	funcs.AddConfigCmdFunc(cmd, isInit, onRestart)
+}
+
+func (funcs BusCommandOwnerFuncs) LookupCommand(msgformat string, cmdQueue interface{}) (BusCommandSender, error) {
+	return funcs.LookupCommandFunc(msgformat, cmdQueue)
+}
+
+func (funcs BusCommandOwnerFuncs) LookupQueryCommand(msgformat string, respformat string, oid int, cmdQueue interface{}, isAsync bool) BusQuerySender {
+	return funcs.LookupQueryCommandFunc(msgformat, respformat, oid, cmdQueue, isAsync)
 }
 
 type SPIBusRuntime struct {

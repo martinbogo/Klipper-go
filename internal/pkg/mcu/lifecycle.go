@@ -2,6 +2,61 @@ package mcu
 
 import "fmt"
 
+type LifecycleState struct {
+	isShutdown      bool
+	shutdownClock   int64
+	shutdownMessage string
+	isTimeout       bool
+}
+
+func NewLifecycleState() *LifecycleState {
+	return &LifecycleState{}
+}
+
+func (self *LifecycleState) HandleShutdownPlan(plan ShutdownPlan) bool {
+	if self.isShutdown {
+		return false
+	}
+	self.isShutdown = true
+	if plan.HasShutdownClock {
+		self.shutdownClock = plan.ShutdownClock
+	}
+	self.shutdownMessage = plan.ShutdownMessage
+	return true
+}
+
+func (self *LifecycleState) StartingShutdownMessage(mcuName string) string {
+	return BuildStartingShutdownMessage(self.isShutdown, mcuName)
+}
+
+func (self *LifecycleState) ShutdownActive() bool {
+	return self.isShutdown
+}
+
+func (self *LifecycleState) ShutdownClock() int64 {
+	return self.shutdownClock
+}
+
+func (self *LifecycleState) ShutdownMessage() string {
+	return self.shutdownMessage
+}
+
+func (self *LifecycleState) ClearShutdown() {
+	self.isShutdown = false
+}
+
+func (self *LifecycleState) MarkShutdown() {
+	self.isShutdown = true
+}
+
+func (self *LifecycleState) TimeoutActive() bool {
+	return self.isTimeout
+}
+
+func (self *LifecycleState) SetTimeout(active bool) {
+	self.isTimeout = active
+}
+
 type ShutdownPlan struct {
 	HasShutdownClock bool
 	ShutdownClock    int64

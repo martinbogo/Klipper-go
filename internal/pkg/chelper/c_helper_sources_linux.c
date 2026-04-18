@@ -1,3 +1,6 @@
+//go:build chelper_embed
+// +build chelper_embed
+
 #include "../../../chelper/itersolve.c"
 #include "../../../chelper/kin_cartesian.c"
 #include "../../../chelper/kin_corexy.c"

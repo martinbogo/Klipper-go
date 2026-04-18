@@ -1,14 +1,33 @@
 package tmc
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 type fakeDriverConfig struct {
+	name   string
 	values map[string]interface{}
+}
+
+func (self *fakeDriverConfig) Get_name() string {
+	if self.name == "" {
+		return "tmc2209 stepper_x"
+	}
+	return self.name
 }
 
 func (self *fakeDriverConfig) Get(option string, default1 interface{}, noteValid bool) interface{} {
 	if value, ok := self.values[option]; ok {
 		return value
+	}
+	return default1
+}
+
+func (self *fakeDriverConfig) Getchoice(option string, choices map[interface{}]interface{}, default1 interface{}, noteValid bool) interface{} {
+	value := self.Get(option, default1, noteValid)
+	if resolved, ok := choices[value]; ok {
+		return resolved
 	}
 	return default1
 }
@@ -115,14 +134,17 @@ func (self *fakeCommandHelper) GetPhaseOffset() (*int, int)              { retur
 func (self *fakeCommandHelper) GetStatus(float64) map[string]interface{} { return self.status }
 
 type fakeDriverAdapter struct {
-	uartCalls        int
-	spiCalls         int
-	spi2660Calls     int
-	virtualPinCalls  int
-	stealthchopCalls int
-	current2660Calls int
-	lastFields       *FieldHelper
-	commandHelper    *fakeCommandHelper
+	uartCalls         int
+	spiCalls          int
+	spi2660Calls      int
+	virtualPinCalls   int
+	stealthchopCalls  int
+	coolstepCalls     int
+	highVelocityCalls int
+	current2660Calls  int
+	lastUARTMaxAddr   int64
+	lastFields        *FieldHelper
+	commandHelper     *fakeCommandHelper
 }
 
 func newFakeDriverAdapter() *fakeDriverAdapter {
@@ -131,6 +153,7 @@ func newFakeDriverAdapter() *fakeDriverAdapter {
 
 func (self *fakeDriverAdapter) NewUART(config DriverConfig, nameToReg map[string]int64, fields *FieldHelper, maxAddr int64, tmcFrequency float64) RegisterAccess {
 	self.uartCalls++
+	self.lastUARTMaxAddr = maxAddr
 	self.lastFields = fields
 	return &fakeRegisterAccess{fields: fields}
 }
@@ -159,6 +182,28 @@ func (self *fakeDriverAdapter) ApplyStealthchop(config DriverConfig, mcuTMC Regi
 	self.stealthchopCalls++
 }
 
+func (self *fakeDriverAdapter) ApplyCoolstepThreshold(config DriverConfig, mcuTMC RegisterAccess, tmcFrequency float64) {
+	self.coolstepCalls++
+}
+
+func (self *fakeDriverAdapter) ApplyHighVelocityThreshold(config DriverConfig, mcuTMC RegisterAccess, tmcFrequency float64) {
+	self.highVelocityCalls++
+}
+
+type orderingDriverAdapter struct {
+	*fakeDriverAdapter
+}
+
+func (self *orderingDriverAdapter) ApplyStealthchop(config DriverConfig, mcuTMC RegisterAccess, tmcFrequency float64) {
+	self.fakeDriverAdapter.ApplyStealthchop(config, mcuTMC, tmcFrequency)
+	ApplyStealthchop(self.lastFields, tmcFrequency, 0, math.NaN())
+}
+
+func (self *orderingDriverAdapter) ApplyCoolstepThreshold(config DriverConfig, mcuTMC RegisterAccess, tmcFrequency float64) {
+	self.fakeDriverAdapter.ApplyCoolstepThreshold(config, mcuTMC, tmcFrequency)
+	self.lastFields.Set_field("tcoolthrs", 0, nil, nil)
+}
+
 func (self *fakeDriverAdapter) NewTMC2660CurrentHelper(config DriverConfig, mcuTMC RegisterAccess) CurrentControl {
 	self.current2660Calls++
 	return NewTMC2660CurrentHelper(config, mcuTMC, nil, nil)
@@ -183,6 +228,12 @@ func TestNewTMC2240ChoosesUARTWhenConfigured(t *testing.T) {
 	}
 	if adapter.stealthchopCalls != 1 {
 		t.Fatalf("expected stealthchop helper for TMC2240, got %d", adapter.stealthchopCalls)
+	}
+	if adapter.coolstepCalls != 1 || adapter.highVelocityCalls != 1 {
+		t.Fatalf("expected coolstep/high-velocity helpers for TMC2240, got coolstep=%d high=%d", adapter.coolstepCalls, adapter.highVelocityCalls)
+	}
+	if adapter.lastUARTMaxAddr != 7 {
+		t.Fatalf("expected TMC2240 UART max address 7, got %d", adapter.lastUARTMaxAddr)
 	}
 	if module.Get_status(0)["ok"] != true {
 		t.Fatalf("expected shared driver module to expose command-helper status")
@@ -248,5 +299,102 @@ func TestNewTMC2660UsesSpecialCurrentHelper(t *testing.T) {
 	}
 	if module.Get_status(0)["ok"] != true {
 		t.Fatalf("expected shared driver module to expose command-helper status")
+	}
+}
+
+func TestNewTMC2209MatchesUpstreamEarlyRegisterOrder(t *testing.T) {
+	config := &fakeDriverConfig{values: map[string]interface{}{
+		"run_current":    0.8,
+		"hold_current":   0.5,
+		"sense_resistor": 0.11,
+	}}
+	adapter := &orderingDriverAdapter{fakeDriverAdapter: newFakeDriverAdapter()}
+	NewTMC2209(config, adapter)
+
+	got := adapter.lastFields.orderedRegisterNames()
+	wantPrefix := []string{"GCONF", "SLAVECONF", "CHOPCONF", "IHOLD_IRUN", "TPWMTHRS", "TCOOLTHRS", "COOLCONF", "PWMCONF", "TPOWERDOWN", "SGTHRS"}
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("ordered register list too short: %#v", got)
+	}
+	for i := range wantPrefix {
+		if got[i] != wantPrefix[i] {
+			t.Fatalf("ordered register %d = %q, want %q (%#v)", i, got[i], wantPrefix[i], got)
+		}
+	}
+}
+
+func TestNewTMC2130AppliesWaveTableAndThresholdHelpers(t *testing.T) {
+	config := &fakeDriverConfig{values: map[string]interface{}{
+		"run_current":    0.8,
+		"hold_current":   0.5,
+		"sense_resistor": 0.11,
+	}}
+	adapter := newFakeDriverAdapter()
+	NewTMC2130(config, adapter)
+
+	if adapter.virtualPinCalls != 1 {
+		t.Fatalf("expected virtual pin helper for TMC2130, got %d", adapter.virtualPinCalls)
+	}
+	if adapter.stealthchopCalls != 1 || adapter.coolstepCalls != 1 || adapter.highVelocityCalls != 1 {
+		t.Fatalf("expected all threshold helpers for TMC2130, got stealth=%d coolstep=%d high=%d", adapter.stealthchopCalls, adapter.coolstepCalls, adapter.highVelocityCalls)
+	}
+	if _, ok := adapter.lastFields.Registers()["MSLUT0"]; !ok {
+		t.Fatalf("expected wave table defaults for TMC2130")
+	}
+	if got := adapter.lastFields.Get_field("freewheel", nil, nil); got != 0 {
+		t.Fatalf("expected TMC2130 freewheel default 0, got %d", got)
+	}
+	if got := adapter.lastFields.Get_field("vhighfs", nil, nil); got != 0 {
+		t.Fatalf("expected TMC2130 vhighfs default 0, got %d", got)
+	}
+	if got := adapter.lastFields.Get_field("semin", nil, nil); got != 0 {
+		t.Fatalf("expected TMC2130 semin default 0, got %d", got)
+	}
+}
+
+func TestNewTMC5160AppliesWaveTableAndThresholdHelpers(t *testing.T) {
+	config := &fakeDriverConfig{values: map[string]interface{}{
+		"run_current":    0.8,
+		"hold_current":   0.5,
+		"sense_resistor": 0.11,
+	}}
+	adapter := newFakeDriverAdapter()
+	NewTMC5160(config, adapter)
+
+	if adapter.virtualPinCalls != 1 {
+		t.Fatalf("expected virtual pin helper for TMC5160, got %d", adapter.virtualPinCalls)
+	}
+	if adapter.stealthchopCalls != 1 || adapter.coolstepCalls != 1 || adapter.highVelocityCalls != 1 {
+		t.Fatalf("expected all threshold helpers for TMC5160, got stealth=%d coolstep=%d high=%d", adapter.stealthchopCalls, adapter.coolstepCalls, adapter.highVelocityCalls)
+	}
+	if _, ok := adapter.lastFields.Registers()["MSLUT0"]; !ok {
+		t.Fatalf("expected wave table defaults for TMC5160")
+	}
+}
+
+func TestConfigureTMC2208MatchesUpstreamDefaults(t *testing.T) {
+	fields := NewFieldHelper(TMC2208Fields, TMC2208SignedFields, TMC2208FieldFormatters, nil)
+	ConfigureTMC2208(&fakeDriverConfig{values: map[string]interface{}{}}, fields)
+	if got := fields.Get_field("freewheel", nil, nil); got != 0 {
+		t.Fatalf("expected TMC2208 freewheel default 0, got %d", got)
+	}
+}
+
+func TestConfigureTMC2209MatchesUpstreamDefaults(t *testing.T) {
+	fields := NewFieldHelper(TMC2209Fields, TMC2208SignedFields, TMC2209FieldFormatters, nil)
+	ConfigureTMC2209(&fakeDriverConfig{values: map[string]interface{}{}}, fields)
+	if got := fields.Get_field("freewheel", nil, nil); got != 0 {
+		t.Fatalf("expected TMC2209 freewheel default 0, got %d", got)
+	}
+	if got := fields.Get_field("semin", nil, nil); got != 0 {
+		t.Fatalf("expected TMC2209 semin default 0, got %d", got)
+	}
+}
+
+func TestConfigureTMC2240MatchesUpstreamDefaults(t *testing.T) {
+	fields := NewFieldHelper(TMC2240Fields, TMC2240SignedFields, TMC2240FieldFormatters, nil)
+	ConfigureTMC2240(&fakeDriverConfig{values: map[string]interface{}{}}, fields)
+	if got := fields.Get_field("sg4_thrs", nil, nil); got != 0 {
+		t.Fatalf("expected TMC2240 sg4_thrs default 0, got %d", got)
 	}
 }

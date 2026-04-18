@@ -8,12 +8,22 @@ import (
 	iopkg "goklipper/internal/pkg/io"
 	mcupkg "goklipper/internal/pkg/mcu"
 	motionpkg "goklipper/internal/pkg/motion"
+	bedmeshpkg "goklipper/internal/pkg/motion/bed_mesh"
 	probepkg "goklipper/internal/pkg/motion/probe"
 	vibrationpkg "goklipper/internal/pkg/motion/vibration"
 	printerpkg "goklipper/internal/pkg/printer"
 	utilpkg "goklipper/internal/pkg/util"
 	printpkg "goklipper/internal/print"
 )
+
+func BuildRegistry(registerProject func(*printerpkg.ModuleRegistry)) *printerpkg.ModuleRegistry {
+	module := printerpkg.NewModuleRegistry()
+	if registerProject != nil {
+		registerProject(module)
+	}
+	RegisterInternalModules(module)
+	return module
+}
 
 func RegisterInternalModules(module *printerpkg.ModuleRegistry) {
 	for _, item := range []struct {
@@ -39,12 +49,15 @@ func RegisterInternalModules(module *printerpkg.ModuleRegistry) {
 		{name: "print_stats", init: printpkg.LoadConfigPrintStats},
 		{name: "idle_timeout", init: printpkg.LoadConfigIdleTimeout},
 		{name: "exclude_object", init: addonpkg.LoadConfigExcludeObject},
+		{name: "adaptive_bed_mesh", init: bedmeshpkg.LoadConfigAdaptiveBedMesh},
 		{name: "safe_z_home", init: addonpkg.LoadConfigSafeZHoming},
 		{name: "virtual_sdcard", init: addonpkg.LoadConfigVirtualSD},
 		{name: "statistics", init: printerpkg.LoadConfigStatsModule},
 		{name: "save_variables", init: addonpkg.LoadConfigSaveVariables},
 		{name: "mcu_ota", init: addonpkg.LoadConfigMCUOTA},
+		{name: "led_pin", init: addonpkg.LoadConfigLedDigitalOut},
 		{name: "pause_resume", init: gcodepkg.LoadConfigPauseResume},
+		{name: "gcode_macro", init: gcodepkg.LoadConfigGCodeMacro},
 		{name: "gcode_move", init: gcodepkg.LoadConfigGCodeMove},
 		{name: "input_shaper", init: vibrationpkg.LoadConfigInputShaper},
 		{name: "resonance_tester", init: vibrationpkg.LoadConfigResonanceTester},

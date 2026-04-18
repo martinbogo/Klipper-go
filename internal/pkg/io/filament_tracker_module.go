@@ -7,9 +7,9 @@ import (
 	printerpkg "goklipper/internal/pkg/printer"
 )
 
-const filamentTrackerADCReportTime = 0.005
+const filamentTrackerADCReportTime = 0.020
 const filamentTrackerADCSampleTime = 0.001
-const filamentTrackerADCSampleCount = 31
+const filamentTrackerADCSampleCount = 16
 const filamentTrackerADCReferVoltage = 0.70
 
 type filamentTrackerButtons interface {
@@ -64,23 +64,35 @@ func NewFilamentTrackerModule(config printerpkg.ModuleConfig) *FilamentTrackerMo
 		lastPosMap: map[string]float64{},
 	}
 	breakPin := config.String("tracker_break_pin", "", true)
+	if breakPin == "" {
+		breakPin = config.String("tracker_detect_pin", "", true)
+	}
 	blockPin := config.String("tracker_block_pin", "", true)
+	if blockPin == "" {
+		blockPin = config.String("tracker_encoder_pin", "", true)
+	}
 	if breakPin == "" || blockPin == "" {
 		return self
 	}
 
 	if self.signalType == "adc" {
+		adcReportTime := config.Float("adc_report_time", filamentTrackerADCReportTime)
+		adcSampleTime := config.Float("adc_sample_time", filamentTrackerADCSampleTime)
+		adcSampleCount := int(config.Float("adc_sample_count", float64(filamentTrackerADCSampleCount)))
+		if adcSampleCount <= 0 {
+			adcSampleCount = filamentTrackerADCSampleCount
+		}
 		pinsObj := self.printer.LookupObject("pins", nil)
 		pins, ok := pinsObj.(printerpkg.PinRegistry)
 		if !ok {
 			panic(fmt.Sprintf("pins object does not implement PinRegistry: %T", pinsObj))
 		}
 		self.detectADC = pins.SetupADC(breakPin)
-		self.detectADC.SetupCallback(filamentTrackerADCReportTime, self.breakButtonADCCallback)
-		self.detectADC.SetupMinMax(filamentTrackerADCSampleTime, filamentTrackerADCSampleCount, 0, 1, 0)
+		self.detectADC.SetupCallback(adcReportTime, self.breakButtonADCCallback)
+		self.detectADC.SetupMinMax(adcSampleTime, adcSampleCount, 0, 1, 0)
 		self.encoderADC = pins.SetupADC(blockPin)
-		self.encoderADC.SetupCallback(filamentTrackerADCReportTime, self.blockButtonADCCallback)
-		self.encoderADC.SetupMinMax(filamentTrackerADCSampleTime, filamentTrackerADCSampleCount, 0, 1, 0)
+		self.encoderADC.SetupCallback(adcReportTime, self.blockButtonADCCallback)
+		self.encoderADC.SetupMinMax(adcSampleTime, adcSampleCount, 0, 1, 0)
 	} else if self.signalType == "gpio" {
 		buttonsObj := config.LoadObject("buttons")
 		buttons, ok := buttonsObj.(filamentTrackerButtons)
@@ -162,7 +174,7 @@ func (self *FilamentTrackerModule) updateTrackerState(eventtime float64) {
 		}
 	}
 	_ = eventtime
-	}
+}
 
 func (self *FilamentTrackerModule) breakButtonIOHandler(eventtime float64, state int) {
 	currentState := 0
@@ -178,7 +190,7 @@ func (self *FilamentTrackerModule) breakButtonIOHandler(eventtime float64, state
 			self.callback(eventtime, currentState)
 		}
 	}
-	}
+}
 
 func (self *FilamentTrackerModule) _break_button_io_handler(eventtime float64, state int) {
 	self.breakButtonIOHandler(eventtime, state)
@@ -215,4 +227,4 @@ func (self *FilamentTrackerModule) Get_status(eventtime float64) map[string]inte
 		"encoder_pulse":        self.trackerStatus.Encoder_pulse,
 		"encoder_signal_state": self.trackerStatus.Encoder_signal_state,
 	}
-	}
+}

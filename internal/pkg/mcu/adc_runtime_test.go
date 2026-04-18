@@ -22,3 +22,17 @@ func TestADCRuntimeStateProcessAnalogInState(t *testing.T) {
 		t.Fatalf("expected state to store last value %#v, got %#v", lastValue, state.LastValue)
 	}
 }
+
+func TestADCRuntimeStateProcessAnalogInStateValues(t *testing.T) {
+	state := &ADCRuntimeState{InvMaxADC: 1.0 / 4095.0, ReportClock: 50}
+	// 0x0300 = 768 in little-endian (0x00, 0x03)
+	lastValue := state.ProcessAnalogInState(map[string]interface{}{"values": []int{0x00, 0x03}, "next_clock": int64(250)}, func(clock int64) int64 {
+		return clock + 1000
+	}, func(clock int64) float64 {
+		return float64(clock) / 100.0
+	})
+	expected := 768.0 / 4095.0
+	if lastValue[0] != expected {
+		t.Fatalf("unexpected processed value %f, expected %f", lastValue[0], expected)
+	}
+}

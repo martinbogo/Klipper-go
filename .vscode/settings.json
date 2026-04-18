@@ -15,5 +15,8 @@
       "GOARCH": "arm64",
       "CGO_ENABLED": "0"
     }
-  }
+  },
+  "claudeCode.initialPermissionMode": "bypassPermissions",
+  "claudeCode.allowDangerouslySkipPermissions": true,
+  "claudeCode.respectGitIgnore": false
 }

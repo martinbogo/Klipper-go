@@ -1,6 +1,41 @@
 package mcu
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestLifecycleStateTracksShutdownAndTimeout(t *testing.T) {
+	state := NewLifecycleState()
+	if state.ShutdownActive() {
+		t.Fatalf("expected new lifecycle state to start inactive")
+	}
+	if message := state.StartingShutdownMessage("mcu"); message != "MCU 'mcu' spontaneous restart" {
+		t.Fatalf("unexpected starting shutdown message %q", message)
+	}
+	plan := ShutdownPlan{HasShutdownClock: true, ShutdownClock: 42, ShutdownMessage: "fatal"}
+	if !state.HandleShutdownPlan(plan) {
+		t.Fatalf("expected first shutdown plan to apply")
+	}
+	if state.ShutdownClock() != 42 || state.ShutdownMessage() != "fatal" || !state.ShutdownActive() {
+		t.Fatalf("unexpected lifecycle state after shutdown")
+	}
+	if state.HandleShutdownPlan(ShutdownPlan{HasShutdownClock: true, ShutdownClock: 99, ShutdownMessage: "ignored"}) {
+		t.Fatalf("expected repeated shutdown plan to be ignored")
+	}
+	state.ClearShutdown()
+	if state.ShutdownActive() {
+		t.Fatalf("expected shutdown clear to reset active state")
+	}
+	state.MarkShutdown()
+	if !state.ShutdownActive() {
+		t.Fatalf("expected mark shutdown to set active state")
+	}
+	state.SetTimeout(true)
+	if !state.TimeoutActive() {
+		t.Fatalf("expected timeout state to be tracked")
+	}
+}
 
 func TestBuildShutdownPlan(t *testing.T) {
 	plan := BuildShutdownPlan("mcu", map[string]interface{}{
@@ -105,5 +140,111 @@ func TestBuildFirmwareRestartPlan(t *testing.T) {
 	}
 	if BuildFirmwareRestartPlan(false, false, "arduino").Action != FirmwareRestartActionArduino {
 		t.Fatalf("expected default arduino action")
+	}
+}
+
+func TestExecuteFirmwareRestartPlanRoutesAction(t *testing.T) {
+	steps := []string{}
+	ExecuteFirmwareRestartPlan(FirmwareRestartPlan{Action: FirmwareRestartActionCommand}, FirmwareRestartExecutionHooks{
+		RestartRPIUSB: func() {
+			steps = append(steps, "rpi_usb")
+		},
+		RestartViaCommand: func() {
+			steps = append(steps, "command")
+		},
+		RestartCheetah: func() {
+			steps = append(steps, "cheetah")
+		},
+		RestartArduino: func() {
+			steps = append(steps, "arduino")
+		},
+	})
+	if len(steps) != 1 || steps[0] != "command" {
+		t.Fatalf("expected command restart path, got %#v", steps)
+	}
+
+	steps = steps[:0]
+	ExecuteFirmwareRestartPlan(FirmwareRestartPlan{Action: FirmwareRestartActionRPIUSB}, FirmwareRestartExecutionHooks{
+		RestartRPIUSB: func() {
+			steps = append(steps, "rpi_usb")
+		},
+	})
+	if len(steps) != 1 || steps[0] != "rpi_usb" {
+		t.Fatalf("expected rpi_usb restart path, got %#v", steps)
+	}
+
+	steps = steps[:0]
+	ExecuteFirmwareRestartPlan(FirmwareRestartPlan{Skip: true}, FirmwareRestartExecutionHooks{
+		RestartArduino: func() {
+			steps = append(steps, "arduino")
+		},
+	})
+	if len(steps) != 0 {
+		t.Fatalf("expected skipped restart plan to do nothing, got %#v", steps)
+	}
+}
+
+func TestExecuteCommandResetConfigReset(t *testing.T) {
+	plan := BuildCommandResetPlan(false, true, true, "mcu")
+	steps := []string{}
+	errorMessage := ExecuteCommandReset(plan, CommandResetExecutionHooks{
+		DebugLog: func(message string) {
+			steps = append(steps, "debug:"+message)
+		},
+		MarkShutdown: func() {
+			steps = append(steps, "mark")
+		},
+		SendEmergencyStop: func(force bool) {
+			if !force {
+				t.Fatalf("expected forced emergency stop")
+			}
+			steps = append(steps, "emergency_stop")
+		},
+		PauseSeconds: func(seconds float64) {
+			if seconds != plan.PreSendPauseSeconds {
+				t.Fatalf("unexpected pause seconds %f", seconds)
+			}
+			steps = append(steps, "pause")
+		},
+		SendConfigReset: func() {
+			steps = append(steps, "config_reset")
+		},
+		Sleep: func(duration time.Duration) {
+			if duration != time.Duration(plan.PostSendPauseSeconds*float64(time.Second)) {
+				t.Fatalf("unexpected sleep duration %s", duration)
+			}
+			steps = append(steps, "sleep")
+		},
+		Disconnect: func() {
+			steps = append(steps, "disconnect")
+		},
+	})
+	if errorMessage != "" {
+		t.Fatalf("unexpected execute reset error %q", errorMessage)
+	}
+	expected := []string{"debug:" + plan.LogMessage, "mark", "emergency_stop", "pause", "config_reset", "sleep", "disconnect"}
+	if len(steps) != len(expected) {
+		t.Fatalf("unexpected step count %#v", steps)
+	}
+	for i, step := range expected {
+		if steps[i] != step {
+			t.Fatalf("unexpected step order %#v", steps)
+		}
+	}
+}
+
+func TestExecuteCommandResetResetCommand(t *testing.T) {
+	plan := BuildCommandResetPlan(true, true, true, "mcu")
+	resetSent := false
+	errorMessage := ExecuteCommandReset(plan, CommandResetExecutionHooks{
+		SendReset: func() {
+			resetSent = true
+		},
+	})
+	if errorMessage != "" {
+		t.Fatalf("unexpected execute reset error %q", errorMessage)
+	}
+	if !resetSent {
+		t.Fatalf("expected reset command to be sent")
 	}
 }

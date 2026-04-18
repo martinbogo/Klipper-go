@@ -38,6 +38,12 @@ type SafeZHomingModule struct {
 	prevG28        func(printerpkg.Command) error
 }
 
+const (
+	homeAllAlias = "HOME_ALL"
+	homeXYAlias  = "HOME_XY"
+	homeZAlias   = "HOME_Z"
+)
+
 func LoadConfigSafeZHoming(config printerpkg.ModuleConfig) interface{} {
 	homeXPos, homeYPos := parseRequiredFloatPair(config.String("home_xy_position", "", true), "home_xy_position", config.Name())
 	gcodeObj := config.Printer().GCode()
@@ -59,6 +65,9 @@ func LoadConfigSafeZHoming(config printerpkg.ModuleConfig) interface{} {
 	config.LoadObject("homing")
 	self.prevG28 = self.gcode.ReplaceCommand("G28", self.cmdG28, false, "")
 	self.gcode.RegisterCommand("H28", self.cmdH28, false, "")
+	self.gcode.RegisterCommand(homeAllAlias, self.cmdHomeAll, false, "Home all axes")
+	self.gcode.RegisterCommand(homeXYAlias, self.cmdHomeXY, false, "Home X and Y axes")
+	self.gcode.RegisterCommand(homeZAlias, self.cmdHomeZ, false, "Home Z axis")
 	if hasSafeZConfigSection(config, "homing_override") {
 		panic("homing_override and safe_z_homing cannot be used simultaneously")
 	}
@@ -113,6 +122,21 @@ func (self *SafeZHomingModule) invokePrevG28(params map[string]string) error {
 	return self.prevG28(self.gcode.CreateCommand("G28", "G28", params))
 }
 
+func requestedXYHomeParams(homeX bool, homeY bool, homedAxes string) map[string]string {
+	params := map[string]string{}
+	if homeX {
+		params["X"] = "0"
+	}
+	if homeY || (homeX && !axisHomed(homedAxes, "y")) {
+		params["Y"] = "0"
+	}
+	return params
+}
+
+func (self *SafeZHomingModule) invokeG28Alias(raw string, params map[string]string) error {
+	return self.cmdG28(self.gcode.CreateCommand("G28", raw, params))
+}
+
 func (self *SafeZHomingModule) performZHopIfNeeded(toolhead safeZToolhead) {
 	if self.zHop == 0.0 {
 		return
@@ -133,8 +157,14 @@ func (self *SafeZHomingModule) performZHopIfNeeded(toolhead safeZToolhead) {
 }
 
 func (self *SafeZHomingModule) cmdG28(gcmd printerpkg.Command) error {
+	return self.cmdG28WithZHop(gcmd, true)
+}
+
+func (self *SafeZHomingModule) cmdG28WithZHop(gcmd printerpkg.Command, withZHop bool) error {
 	toolhead := self.lookupToolhead()
-	self.performZHopIfNeeded(toolhead)
+	if withZHop {
+		self.performZHopIfNeeded(toolhead)
+	}
 
 	needX := axisRequested(gcmd, "X")
 	needY := axisRequested(gcmd, "Y")
@@ -143,15 +173,10 @@ func (self *SafeZHomingModule) cmdG28(gcmd printerpkg.Command) error {
 		needX, needY, needZ = true, true, true
 	}
 
-	newParams := map[string]string{}
-	if needX {
-		newParams["X"] = "0"
-	}
-	if needY {
-		newParams["Y"] = "0"
-	}
-	if len(newParams) > 0 {
-		if err := self.invokePrevG28(newParams); err != nil {
+	homedAxes := toolhead.HomedAxes(self.reactor.Monotonic())
+	xyParams := requestedXYHomeParams(needX, needY, homedAxes)
+	if len(xyParams) > 0 {
+		if err := self.invokePrevG28(xyParams); err != nil {
 			return err
 		}
 	}
@@ -159,7 +184,7 @@ func (self *SafeZHomingModule) cmdG28(gcmd printerpkg.Command) error {
 		return nil
 	}
 
-	homedAxes := toolhead.HomedAxes(self.reactor.Monotonic())
+	homedAxes = toolhead.HomedAxes(self.reactor.Monotonic())
 	if !axisHomed(homedAxes, "x") || !axisHomed(homedAxes, "y") {
 		panic("Must home X and Y axes first")
 	}
@@ -177,6 +202,18 @@ func (self *SafeZHomingModule) cmdG28(gcmd printerpkg.Command) error {
 	return nil
 }
 
+func (self *SafeZHomingModule) cmdHomeAll(printerpkg.Command) error {
+	return self.invokeG28Alias("G28", nil)
+}
+
+func (self *SafeZHomingModule) cmdHomeXY(printerpkg.Command) error {
+	return self.cmdG28WithZHop(self.gcode.CreateCommand("G28", "G28 X Y", map[string]string{"X": "0", "Y": "0"}), false)
+}
+
+func (self *SafeZHomingModule) cmdHomeZ(printerpkg.Command) error {
+	return self.invokeG28Alias("G28 Z", map[string]string{"Z": "0"})
+}
+
 func (self *SafeZHomingModule) cmdH28(gcmd printerpkg.Command) error {
 	toolhead := self.lookupToolhead()
 	self.performZHopIfNeeded(toolhead)
@@ -189,15 +226,13 @@ func (self *SafeZHomingModule) cmdH28(gcmd printerpkg.Command) error {
 	}
 
 	homedAxes := toolhead.HomedAxes(self.reactor.Monotonic())
-	newParams := map[string]string{}
-	if needX && !axisHomed(homedAxes, "x") {
-		newParams["X"] = "0"
-	}
-	if needY && !axisHomed(homedAxes, "y") {
-		newParams["Y"] = "0"
-	}
-	if len(newParams) > 0 {
-		if err := self.invokePrevG28(newParams); err != nil {
+	xyParams := requestedXYHomeParams(
+		needX && !axisHomed(homedAxes, "x"),
+		needY && !axisHomed(homedAxes, "y"),
+		homedAxes,
+	)
+	if len(xyParams) > 0 {
+		if err := self.invokePrevG28(xyParams); err != nil {
 			return err
 		}
 	}

@@ -96,6 +96,24 @@ func TestSPIRegisterTransportRuntimeRetriesUntilEchoMatches(t *testing.T) {
 	}
 }
 
+func TestNewLockedSPIRegisterAccessUsesLockerForReads(t *testing.T) {
+	transport := &fakeSPIBusTransport{transferResponses: []string{"\x00\x00\x00\x00\x00\x00\x11\x22\x33\x44\x00\x00\x00\x00\x00"}}
+	chain := NewSPIChainRuntime(3, transport, func() bool { return false })
+	locker := &fakeRegisterLocker{}
+	access := NewLockedSPIRegisterAccess("stepper_x", map[string]int64{"GCONF": 0x6}, 2, chain, NewFieldHelper(TMC2209Fields, TMC2208SignedFields, TMC2209FieldFormatters, nil), locker)
+
+	got, err := access.Get_register("GCONF")
+	if err != nil {
+		t.Fatalf("Get_register returned error: %v", err)
+	}
+	if got != 0x11223344 {
+		t.Fatalf("expected 0x11223344, got %#x", got)
+	}
+	if locker.lockCount != 1 || locker.unlockCount != 1 {
+		t.Fatalf("expected one lock/unlock pair, got lock=%d unlock=%d", locker.lockCount, locker.unlockCount)
+	}
+}
+
 func TestTMC2660SPITransportRuntimeChangesRdselOnlyWhenNeeded(t *testing.T) {
 	transport := &fakeSPIBusTransport{transferResponses: []string{"\x01\x02\x03", "\x04\x05\x06"}}
 	fields := NewFieldHelper(map[string]map[string]int64{"DRVCONF": {"rdsel": 0x03 << 4}}, nil, nil, nil)
@@ -124,5 +142,22 @@ func TestTMC2660SPITransportRuntimeChangesRdselOnlyWhenNeeded(t *testing.T) {
 	}
 	if len(transport.sends) != 2 {
 		t.Fatalf("expected repeated rdsel pre-write behavior to be preserved, got %d sends", len(transport.sends))
+	}
+}
+
+func TestNewLockedTMC2660SPIRegisterAccessUsesLockerForWrites(t *testing.T) {
+	transport := &fakeSPIBusTransport{}
+	fields := NewFieldHelper(map[string]map[string]int64{"DRVCONF": {"rdsel": 0x03 << 4}}, nil, nil, nil)
+	locker := &fakeRegisterLocker{}
+	access := NewLockedTMC2660SPIRegisterAccess(map[string]int64{"DRVCONF": 0xE}, fields, transport, func() bool { return false }, locker)
+
+	if err := access.Set_register("DRVCONF", 0x010203, nil); err != nil {
+		t.Fatalf("Set_register returned error: %v", err)
+	}
+	if len(transport.sends) != 1 {
+		t.Fatalf("expected one send, got %d", len(transport.sends))
+	}
+	if locker.lockCount != 1 || locker.unlockCount != 1 {
+		t.Fatalf("expected one lock/unlock pair, got lock=%d unlock=%d", locker.lockCount, locker.unlockCount)
 	}
 }

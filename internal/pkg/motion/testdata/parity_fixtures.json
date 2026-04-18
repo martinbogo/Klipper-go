@@ -1,0 +1,207 @@
+{
+  "planner_profiles": [
+    {
+      "name": "two_move_profile",
+      "config": {
+        "max_accel": 100,
+        "junction_deviation": 0.05,
+        "max_velocity": 50,
+        "max_accel_to_decel": 40
+      },
+      "moves": [
+        {
+          "start_pos": [0, 0, 0, 0],
+          "end_pos": [5, 0, 0, 0],
+          "speed": 25
+        },
+        {
+          "start_pos": [5, 0, 0, 0],
+          "end_pos": [10, 0, 0, 0],
+          "speed": 25
+        }
+      ],
+      "junction_result": 100,
+      "expected_processed": [
+        {
+          "start_v": 0,
+          "cruise_v": 15.811388300841896,
+          "end_v": 10,
+          "accel_t": 0.15811388300841897,
+          "cruise_t": 0.18973665961010275,
+          "decel_t": 0.05811388300841897
+        },
+        {
+          "start_v": 10,
+          "cruise_v": 15.811388300841896,
+          "end_v": 0,
+          "accel_t": 0.05811388300841897,
+          "cruise_t": 0.18973665961010275,
+          "decel_t": 0.15811388300841897
+        }
+      ]
+    }
+  ],
+  "queue_transitions": [
+    {
+      "name": "lazy_flush_boundary",
+      "config": {
+        "max_accel": 100,
+        "junction_deviation": 0.05,
+        "max_velocity": 50,
+        "max_accel_to_decel": 40
+      },
+      "moves": [
+        {
+          "start_pos": [0, 0, 0, 0],
+          "end_pos": [5, 0, 0, 0],
+          "speed": 25
+        },
+        {
+          "start_pos": [5, 0, 0, 0],
+          "end_pos": [10, 0, 0, 0],
+          "speed": 25
+        }
+      ],
+      "junction_result": 100,
+      "expected_lazy_flush_requests": [false, true],
+      "expected_batch_sizes": [1],
+      "expected_remaining_queue_len": 1
+    }
+  ],
+  "flush_wakeups": [
+    {
+      "name": "background_flush_step",
+      "config": {
+        "buffer_time_low": 1,
+        "bg_flush_low_time": 0.2,
+        "bg_flush_high_time": 0.4,
+        "bg_flush_sg_low_time": 0.45,
+        "bg_flush_sg_high_time": 0.7,
+        "bg_flush_batch_time": 0.2,
+        "bg_flush_extra_time": 0.25,
+        "stepcompress_flush_time": 0.05
+      },
+      "eventtime": 10,
+      "estimated_print_time": 9,
+      "state": {
+        "print_time": 9,
+        "last_flush_time": 8.9,
+        "last_step_gen_time": 9.8,
+        "need_flush_time": 9.6,
+        "need_step_gen_time": 10,
+        "special_queuing_state": "NeedPrime",
+        "kin_flush_delay": 0.2
+      },
+      "expected": {
+        "should_flush_lookahead": false,
+        "advance_flush_times": [9.4],
+        "next_wake_time": 10.2,
+        "return_never": false,
+        "kick_flush_timer": false
+      }
+    },
+    {
+      "name": "aggressive_step_generation",
+      "config": {
+        "buffer_time_low": 1,
+        "bg_flush_low_time": 0.2,
+        "bg_flush_high_time": 0.4,
+        "bg_flush_sg_low_time": 0.45,
+        "bg_flush_sg_high_time": 0.7,
+        "bg_flush_batch_time": 0.2,
+        "bg_flush_extra_time": 0.25,
+        "stepcompress_flush_time": 0.05
+      },
+      "eventtime": 100,
+      "estimated_print_time": 9,
+      "state": {
+        "print_time": 9,
+        "last_flush_time": 8.9,
+        "last_step_gen_time": 9.1,
+        "need_flush_time": 9.6,
+        "need_step_gen_time": 10,
+        "special_queuing_state": "NeedPrime",
+        "kin_flush_delay": 0.2
+      },
+      "expected": {
+        "should_flush_lookahead": false,
+        "advance_flush_times": [9.3],
+        "next_wake_time": 99.9,
+        "return_never": false,
+        "kick_flush_timer": false
+      }
+    },
+    {
+      "name": "completed_flush_window",
+      "config": {
+        "buffer_time_low": 1,
+        "bg_flush_low_time": 0.2,
+        "bg_flush_high_time": 0.4,
+        "bg_flush_sg_low_time": 0.45,
+        "bg_flush_sg_high_time": 0.7,
+        "bg_flush_batch_time": 0.2,
+        "bg_flush_extra_time": 0.25,
+        "stepcompress_flush_time": 0.05
+      },
+      "eventtime": 10,
+      "estimated_print_time": 9,
+      "state": {
+        "print_time": 9,
+        "last_flush_time": 9.4,
+        "last_step_gen_time": 9.4,
+        "need_flush_time": 9,
+        "need_step_gen_time": 9,
+        "special_queuing_state": "",
+        "kin_flush_delay": 0.001
+      },
+      "expected": {
+        "should_flush_lookahead": true,
+        "advance_flush_times": [],
+        "next_wake_time": 0,
+        "return_never": true,
+        "kick_flush_timer": true
+      }
+    }
+  ],
+  "trapq_timelines": [
+    {
+      "name": "two_move_append_timeline",
+      "config": {
+        "max_accel": 100,
+        "junction_deviation": 0.05,
+        "max_velocity": 50,
+        "max_accel_to_decel": 40
+      },
+      "moves": [
+        {
+          "start_pos": [0, 0, 0, 0],
+          "end_pos": [5, 0, 0, 0],
+          "speed": 25
+        },
+        {
+          "start_pos": [5, 0, 0, 0],
+          "end_pos": [10, 0, 0, 0],
+          "speed": 25
+        }
+      ],
+      "junction_result": 100,
+      "start_print_time": 7.5,
+      "expected": [
+        {
+          "print_time": 7.5,
+          "start_v": 0,
+          "cruise_v": 15.811388300841896,
+          "accel": 100,
+          "move_time": 0.4059644256269407
+        },
+        {
+          "print_time": 7.905964425626941,
+          "start_v": 10,
+          "cruise_v": 15.811388300841896,
+          "accel": 100,
+          "move_time": 0.4059644256269407
+        }
+      ]
+    }
+  ]
+}

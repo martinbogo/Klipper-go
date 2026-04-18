@@ -31,6 +31,62 @@ type Rail interface {
 	Get_name(short bool) string
 }
 
+type RailFuncs struct {
+	SetupItersolveFunc       func(string, ...interface{})
+	GetSteppersFunc          func() []Stepper
+	PrimaryEndstopFunc       func() RailEndstop
+	GetRangeFunc             func() (float64, float64)
+	SetPositionFunc          func([]float64)
+	GetHomingInfoFunc        func() *RailHomingInfo
+	SetTrapqFunc             func(interface{})
+	GetCommandedPositionFunc func() float64
+	GetNameFunc              func(bool) string
+}
+
+func (self *RailFuncs) Setup_itersolve(alloc_func string, params ...interface{}) {
+	self.SetupItersolveFunc(alloc_func, params...)
+}
+
+func (self *RailFuncs) Get_steppers() []Stepper {
+	return self.GetSteppersFunc()
+}
+
+func (self *RailFuncs) Primary_endstop() RailEndstop {
+	return self.PrimaryEndstopFunc()
+}
+
+func (self *RailFuncs) Get_range() (float64, float64) {
+	return self.GetRangeFunc()
+}
+
+func (self *RailFuncs) Set_position(newpos []float64) {
+	self.SetPositionFunc(newpos)
+}
+
+func (self *RailFuncs) Get_homing_info() *RailHomingInfo {
+	return self.GetHomingInfoFunc()
+}
+
+func (self *RailFuncs) Set_trapq(tq interface{}) {
+	self.SetTrapqFunc(tq)
+}
+
+func (self *RailFuncs) Get_commanded_position() float64 {
+	return self.GetCommandedPositionFunc()
+}
+
+func (self *RailFuncs) Get_name(short bool) string {
+	return self.GetNameFunc(short)
+}
+
+type RailEndstopFuncs struct {
+	AddStepperFunc func(Stepper)
+}
+
+func (self *RailEndstopFuncs) Add_stepper(stepper Stepper) {
+	self.AddStepperFunc(stepper)
+}
+
 type Toolhead interface {
 	Get_trapq() interface{}
 	Register_step_generator(handler func(float64))
@@ -55,6 +111,19 @@ type Move interface {
 type HomingState interface {
 	GetAxes() []int
 	HomeRails(rails []Rail, forcepos []interface{}, homepos []interface{})
+}
+
+type HomingStateFuncs struct {
+	GetAxesFunc   func() []int
+	HomeRailsFunc func([]Rail, []interface{}, []interface{})
+}
+
+func (self *HomingStateFuncs) GetAxes() []int {
+	return self.GetAxesFunc()
+}
+
+func (self *HomingStateFuncs) HomeRails(rails []Rail, forcepos []interface{}, homepos []interface{}) {
+	self.HomeRailsFunc(rails, forcepos, homepos)
 }
 
 type Kinematics interface {

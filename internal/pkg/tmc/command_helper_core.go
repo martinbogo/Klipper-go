@@ -41,7 +41,8 @@ func (self *CommandHelperCore) Fields() *FieldHelper {
 }
 
 func (self *CommandHelperCore) InitRegisters(printTime *float64) error {
-	for regName, val := range self.fields.Registers() {
+	for _, regName := range self.fields.orderedRegisterNames() {
+		val := self.fields.Registers()[regName]
 		if err := self.mcuTMC.Set_register(regName, cast.ToInt64(val), printTime); err != nil {
 			return err
 		}
@@ -121,7 +122,7 @@ func (self *CommandHelperCore) DumpRegister(regName string) (string, error) {
 	if hasRegName {
 		readVal, err := self.mcuTMC.Get_register(regName)
 		if err != nil {
-			return "", fmt.Errorf("readable register name '%s' failed", regName)
+			return "", err
 		}
 		if self.readTranslate != nil {
 			regName, readVal = self.readTranslate(regName, readVal)
@@ -133,7 +134,8 @@ func (self *CommandHelperCore) DumpRegister(regName string) (string, error) {
 
 func (self *CommandHelperCore) DumpAllRegisters() ([]string, error) {
 	lines := []string{"========== Write-only registers =========="}
-	for regName, val := range self.fields.Registers() {
+	for _, regName := range self.fields.orderedRegisterNames() {
+		val := self.fields.Registers()[regName]
 		if !collections.Contains(self.readRegisters, regName) {
 			lines = append(lines, self.fields.Pretty_format(regName, val))
 		}
@@ -161,11 +163,11 @@ func (self *CommandHelperCore) HasVirtualEnable() bool {
 	return value.IsNotNone(self.toff)
 }
 
-func (self *CommandHelperCore) ApplyEnableRegisters() error {
+func (self *CommandHelperCore) ApplyEnableRegisters(printTime *float64) error {
 	if self.HasVirtualEnable() {
-		self.fields.Set_field("toff", 1, nil, nil)
+		self.fields.Set_field("toff", cast.ToInt64(self.toff), nil, nil)
 	}
-	return self.InitRegisters(nil)
+	return self.InitRegisters(printTime)
 }
 
 func (self *CommandHelperCore) ApplyDisableRegisters(printTime *float64) error {

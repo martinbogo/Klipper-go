@@ -6,6 +6,12 @@ import (
 	"goklipper/common/utils/cast"
 	"goklipper/common/utils/maths"
 	"goklipper/common/value"
+	"strings"
+)
+
+const (
+	commandRuntimePhaseQueryRetryCount = 3
+	commandRuntimePhaseQueryRetryDelay = .050
 )
 
 type CommandStatusChecker interface {
@@ -33,6 +39,19 @@ type CommandMutex interface {
 	Unlock()
 }
 
+type CommandMutexFuncs struct {
+	LockFunc   func()
+	UnlockFunc func()
+}
+
+func (funcs CommandMutexFuncs) Lock() {
+	funcs.LockFunc()
+}
+
+func (funcs CommandMutexFuncs) Unlock() {
+	funcs.UnlockFunc()
+}
+
 type CommandEnableLine interface {
 	Register_state_callback(callback func(float64, bool))
 	Is_motor_enabled() bool
@@ -41,6 +60,12 @@ type CommandEnableLine interface {
 
 type CommandStepperEnable interface {
 	Lookup_enable(name string) (CommandEnableLine, error)
+}
+
+type CommandStepperEnableLookupFunc func(name string) (CommandEnableLine, error)
+
+func (fn CommandStepperEnableLookupFunc) Lookup_enable(name string) (CommandEnableLine, error) {
+	return fn(name)
 }
 
 type CommandStepperLookup func(name string) CommandStepper
@@ -61,6 +86,7 @@ type CommandRuntime struct {
 	statusChecker CommandStatusChecker
 	stepperEnable CommandStepperEnable
 	stepper       CommandStepper
+	homingActive  bool
 }
 
 func NewCommandRuntime(stepperName string, mcuTMC RegisterAccess, currentHelper CurrentControl, statusChecker CommandStatusChecker, stepperEnable CommandStepperEnable) *CommandRuntime {
@@ -74,6 +100,31 @@ func NewCommandRuntime(stepperName string, mcuTMC RegisterAccess, currentHelper 
 		statusChecker: statusChecker,
 		stepperEnable: stepperEnable,
 	}
+}
+
+func isCommandRuntimeTransientPhaseQueryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.HasPrefix(err.Error(), "Unable to read tmc uart ")
+}
+
+func (self *CommandRuntime) queryPhaseWithRetry(pauseRetry func()) (int64, error) {
+	var lastErr error
+	for attempt := 0; attempt < commandRuntimePhaseQueryRetryCount; attempt++ {
+		driverPhase, err := self.core.QueryPhase()
+		if err == nil {
+			return driverPhase, nil
+		}
+		lastErr = err
+		if !isCommandRuntimeTransientPhaseQueryError(err) || attempt == commandRuntimePhaseQueryRetryCount-1 {
+			return 0, err
+		}
+		if pauseRetry != nil {
+			pauseRetry()
+		}
+	}
+	return 0, lastErr
 }
 
 func (self *CommandRuntime) InitRegisters(printTime *float64) error {
@@ -109,29 +160,47 @@ func (self *CommandRuntime) DumpAllRegisters() ([]string, error) {
 }
 
 func (self *CommandRuntime) HandleSyncMCUPos(stepper CommandStepper) error {
+	return self.handleSyncMCUPos(stepper, nil)
+}
+
+func (self *CommandRuntime) handleSyncMCUPos(stepper CommandStepper, pauseRetry func()) error {
 	if stepper.Get_name(false) != self.stepperName {
+		return nil
+	}
+	if self.homingActive {
+		// Homing runs sensorless threshold changes and other UART-heavy traffic.
+		// Skip phase-sync reads in this window to avoid adding read-retry/pause
+		// pressure that can delay motion scheduling and increase noise.
 		return nil
 	}
 
 	defer func() {
 		if r := recover(); r != nil {
+			panicErr, ok := r.(error)
+			if !ok {
+				panicErr = fmt.Errorf("%v", r)
+			}
 			logger.Infof("Unable to obtain tmc %s phase", self.stepperName)
 			self.core.ClearPhaseOffset()
+			if self.homingActive && isCommandRuntimeTransientPhaseQueryError(panicErr) {
+				logger.Warnf("Suppressing transient tmc %s phase-sync UART read failure during homing", self.stepperName)
+				return
+			}
 			if self.stepperEnable == nil {
 				return
 			}
 			enableLine, err := self.stepperEnable.Lookup_enable(self.stepperName)
 			if err == nil {
 				if enableLine.Is_motor_enabled() {
-					logger.Panicf("TMCCommandRuntime HandleSyncMCUPos %v", r)
+					logger.Panicf("TMCCommandRuntime HandleSyncMCUPos %v", panicErr)
 				}
 			} else {
-				logger.Errorf("TMCCommandRuntime HandleSyncMCUPos %v, error: %v", r, err)
+				logger.Errorf("TMCCommandRuntime HandleSyncMCUPos %v, error: %v", panicErr, err)
 			}
 		}
 	}()
 
-	driverPhase, err := self.core.QueryPhase()
+	driverPhase, err := self.queryPhaseWithRetry(pauseRetry)
 	if err != nil {
 		panic(err)
 	}
@@ -152,13 +221,20 @@ func (self *CommandRuntime) HandleSyncMCUPos(stepper CommandStepper) error {
 	return nil
 }
 
-func (self *CommandRuntime) HandleEnable(toolhead CommandToolhead, mutex CommandMutex) error {
-	if err := self.core.ApplyEnableRegisters(); err != nil {
+func (self *CommandRuntime) HandleEnable(toolhead CommandToolhead, mutex CommandMutex, printTime *float64) error {
+	if err := self.core.ApplyEnableRegisters(printTime); err != nil {
 		return err
 	}
 	didReset := self.statusChecker.StartChecks()
 	if didReset {
 		self.core.ClearPhaseOffset()
+	}
+	if self.homingActive {
+		// During homing, phase-sync reads contend with sensorless/UART traffic and
+		// can introduce multi-second stalls between axis moves. Treat phase offset
+		// as optional while homing is active and let normal sync events refresh it
+		// after homing completes.
+		return nil
 	}
 
 	phaseOffset, _ := self.core.GetPhaseOffset()
@@ -177,7 +253,9 @@ func (self *CommandRuntime) HandleEnable(toolhead CommandToolhead, mutex Command
 
 	logger.Infof("Pausing toolhead to calculate %s phase offset", self.stepperName)
 	toolhead.Wait_moves()
-	return self.HandleSyncMCUPos(self.stepper)
+	return self.handleSyncMCUPos(self.stepper, func() {
+		pauseDriverCommandToolhead(toolhead, commandRuntimePhaseQueryRetryDelay)
+	})
 }
 
 func (self *CommandRuntime) HandleDisable(printTime *float64) error {
@@ -186,6 +264,20 @@ func (self *CommandRuntime) HandleDisable(printTime *float64) error {
 	}
 	self.statusChecker.StopChecks()
 	return nil
+}
+
+// SetHomingActive propagates the homing-active flag to the error-check runtime
+// so it can suppress UART read failure counting while homing moves are in
+// progress. This is a no-op if the status checker is not an ErrorCheckRuntime.
+func (self *CommandRuntime) SetHomingActive(active bool) {
+	self.homingActive = active
+	if checker, ok := self.statusChecker.(*ErrorCheckRuntime); ok {
+		checker.SetHomingActive(active)
+	}
+}
+
+func (self *CommandRuntime) IsHomingActive() bool {
+	return self.homingActive
 }
 
 func (self *CommandRuntime) HandleMCUIdentify(lookupStepper CommandStepperLookup) error {

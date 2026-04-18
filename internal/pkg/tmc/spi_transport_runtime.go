@@ -10,9 +10,9 @@ type SPIBusTransport interface {
 }
 
 type SPIChainRuntime struct {
-	chainLen      int64
-	transport     SPIBusTransport
-	debugEnabled  func() bool
+	chainLen       int64
+	transport      SPIBusTransport
+	debugEnabled   func() bool
 	takenPositions map[int64]bool
 }
 
@@ -78,6 +78,11 @@ func NewSPIRegisterTransportRuntime(name string, nameToReg map[string]int64, cha
 	return &SPIRegisterTransportRuntime{name: name, nameToReg: nameToReg, chainPos: chainPos, chain: chain}
 }
 
+func NewLockedSPIRegisterAccess(name string, nameToReg map[string]int64, chainPos int64, chain *SPIChainRuntime, fields *FieldHelper, mutex RegisterLocker) RegisterAccess {
+	runtime := NewSPIRegisterTransportRuntime(name, nameToReg, chainPos, chain)
+	return NewLockedRegisterAccess(fields, runtime, mutex)
+}
+
 func (self *SPIRegisterTransportRuntime) GetRegister(regName string) (int64, error) {
 	return self.chain.ReadRegister(self.nameToReg[regName], self.chainPos), nil
 }
@@ -101,6 +106,11 @@ type TMC2660SPITransportRuntime struct {
 
 func NewTMC2660SPITransportRuntime(nameToReg map[string]int64, fields *FieldHelper, transport SPIBusTransport, debugEnabled func() bool) *TMC2660SPITransportRuntime {
 	return &TMC2660SPITransportRuntime{nameToReg: nameToReg, fields: fields, transport: transport, debugEnabled: debugEnabled}
+}
+
+func NewLockedTMC2660SPIRegisterAccess(nameToReg map[string]int64, fields *FieldHelper, transport SPIBusTransport, debugEnabled func() bool, mutex RegisterLocker) RegisterAccess {
+	runtime := NewTMC2660SPITransportRuntime(nameToReg, fields, transport, debugEnabled)
+	return NewLockedRegisterAccess(fields, runtime, mutex)
 }
 
 func (self *TMC2660SPITransportRuntime) GetRegister(regName string) (int64, error) {

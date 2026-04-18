@@ -148,16 +148,16 @@ func TestLoadConfigFilamentTrackerADCConfiguresPinsAndUpdatesState(t *testing.T)
 	if breakADC == nil || blockADC == nil {
 		t.Fatalf("expected both adc pins to be configured")
 	}
-	if len(breakADC.reportTimes) != 1 || breakADC.reportTimes[0] != 0.005 {
+	if len(breakADC.reportTimes) != 1 || breakADC.reportTimes[0] != filamentTrackerADCReportTime {
 		t.Fatalf("unexpected break adc report times: %#v", breakADC.reportTimes)
 	}
-	if len(blockADC.reportTimes) != 1 || blockADC.reportTimes[0] != 0.005 {
+	if len(blockADC.reportTimes) != 1 || blockADC.reportTimes[0] != filamentTrackerADCReportTime {
 		t.Fatalf("unexpected block adc report times: %#v", blockADC.reportTimes)
 	}
-	if len(breakADC.minmaxCalls) != 1 || breakADC.minmaxCalls[0] != [5]float64{0.001, 31, 0, 1, 0} {
+	if len(breakADC.minmaxCalls) != 1 || breakADC.minmaxCalls[0] != [5]float64{filamentTrackerADCSampleTime, filamentTrackerADCSampleCount, 0, 1, 0} {
 		t.Fatalf("unexpected break adc minmax: %#v", breakADC.minmaxCalls)
 	}
-	if len(blockADC.minmaxCalls) != 1 || blockADC.minmaxCalls[0] != [5]float64{0.001, 31, 0, 1, 0} {
+	if len(blockADC.minmaxCalls) != 1 || blockADC.minmaxCalls[0] != [5]float64{filamentTrackerADCSampleTime, filamentTrackerADCSampleCount, 0, 1, 0} {
 		t.Fatalf("unexpected block adc minmax: %#v", blockADC.minmaxCalls)
 	}
 
@@ -185,5 +185,48 @@ func TestLoadConfigFilamentTrackerADCConfiguresPinsAndUpdatesState(t *testing.T)
 	}
 	if !module.Is_filament_present() {
 		t.Fatalf("expected adc path to mark filament present")
+	}
+}
+
+func TestLoadConfigFilamentTrackerADCAcceptsLegacyDetectEncoderPins(t *testing.T) {
+	pins := &fakeButtonsPinRegistry{}
+	reactor := &fakeButtonsReactor{monotonic: 5.0}
+	printer := &fakeButtonsPrinter{
+		lookup:  map[string]interface{}{"pins": pins},
+		mcus:    map[string]printerpkg.MCURuntime{},
+		reactor: reactor,
+	}
+	config := &fakeTrackerConfig{
+		printer: printer,
+		strings: map[string]string{
+			"tracker_detect_pin":  "PB0",
+			"tracker_encoder_pin": "PB1",
+			"signal_type":         "adc",
+		},
+		floats:  map[string]float64{},
+		objects: map[string]interface{}{},
+	}
+
+	module := LoadConfigFilamentTracker(config).(*FilamentTrackerModule)
+	if module == nil {
+		t.Fatalf("expected filament tracker module instance")
+	}
+	if !reflect.DeepEqual(pins.adcSetupPins, []string{"PB0", "PB1"}) {
+		t.Fatalf("unexpected adc setup pins for legacy names: %#v", pins.adcSetupPins)
+	}
+	if module.detectADC == nil || module.encoderADC == nil {
+		t.Fatalf("expected adc pins to be configured for legacy names")
+	}
+	if _, ok := pins.adcPins["PB0"]; !ok {
+		t.Fatalf("expected detect adc pin registration for legacy name")
+	}
+	if _, ok := pins.adcPins["PB1"]; !ok {
+		t.Fatalf("expected encoder adc pin registration for legacy name")
+	}
+	if module.Get_safe_unwind_len() != 100 {
+		t.Fatalf("unexpected default safe unwind len: %d", module.Get_safe_unwind_len())
+	}
+	if module.Get_status(0)["filament_present"].(int) != 0 {
+		t.Fatalf("unexpected initial tracker status for legacy names: %#v", module.Get_status(0))
 	}
 }

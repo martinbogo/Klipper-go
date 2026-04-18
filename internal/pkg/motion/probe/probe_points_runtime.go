@@ -13,7 +13,7 @@ type ProbePointsAutomaticProbe interface {
 type ProbePointsRuntime interface {
 	EnsureNoManualProbe()
 	LookupAutomaticProbe() ProbePointsAutomaticProbe
-	Move(coord []interface{}, speed float64)
+	Move(coord interface{}, speed float64)
 	TouchLastMoveTime()
 	StartManualProbe(finalize func([]float64))
 }

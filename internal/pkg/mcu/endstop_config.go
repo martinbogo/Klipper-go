@@ -1,6 +1,9 @@
 package mcu
 
-import "fmt"
+import (
+	"fmt"
+	"goklipper/common/utils/cast"
+)
 
 type EndstopConfigPlan struct {
 	ConfigCmds          []string
@@ -13,7 +16,7 @@ type EndstopConfigPlan struct {
 func BuildEndstopConfigPlan(oid int, pin interface{}, pullup interface{}) EndstopConfigPlan {
 	return EndstopConfigPlan{
 		ConfigCmds: []string{
-			fmt.Sprintf("config_endstop oid=%d pin=%s pull_up=%d", oid, pin, pullup),
+			fmt.Sprintf("config_endstop oid=%d pin=%s pull_up=%d", oid, pin, cast.ToInt(pullup)),
 		},
 		RestartCmds: []string{
 			fmt.Sprintf("endstop_home oid=%d clock=0 sample_ticks=0 sample_count=0 rest_ticks=0 pin_value=0 trsync_oid=0 trigger_reason=0", oid),

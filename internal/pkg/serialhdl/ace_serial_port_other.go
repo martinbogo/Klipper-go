@@ -9,3 +9,10 @@ func PrepareACESerialPort(file *os.File, name string, baud int) {
 	_ = name
 	_ = baud
 }
+
+func reconfigureSerialPortBaud(file *os.File, name string, baud int) error {
+	_ = file
+	_ = name
+	_ = baud
+	return nil
+}
